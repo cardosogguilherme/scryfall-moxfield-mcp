@@ -51,11 +51,20 @@ class ScryfallClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    async def _post(self, path: str, json: dict) -> dict:
+    async def _post(self, path: str, payload: dict) -> dict:
         await asyncio.sleep(RATE_LIMIT_DELAY)
-        r = await self._http.post(path, json=json, timeout=30.0)
+        r = await self._http.post(path, json=payload)
         r.raise_for_status()
         return r.json()
+
+    async def close(self) -> None:
+        await self._http.aclose()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
 
     async def search_cards(self, query: str, page: int = 1) -> list[dict] | dict:
         try:

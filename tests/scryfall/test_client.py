@@ -7,8 +7,9 @@ SCRYFALL_BASE = "https://api.scryfall.com"
 
 
 @pytest.fixture
-def client():
-    return ScryfallClient()
+async def client():
+    async with ScryfallClient() as c:
+        yield c
 
 
 @respx.mock
