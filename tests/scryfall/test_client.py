@@ -55,6 +55,7 @@ async def test_get_card_by_name_fuzzy(client):
     result = await client.get_card_by_name("ligntning bolt", fuzzy=True)
     assert result["name"] == "Lightning Bolt"
 
+
 @respx.mock
 async def test_get_card_by_name_not_found(client):
     respx.get(f"{SCRYFALL_BASE}/cards/named").mock(return_value=httpx.Response(404, json={
@@ -62,6 +63,18 @@ async def test_get_card_by_name_not_found(client):
     }))
     result = await client.get_card_by_name("xyzxyzxyz")
     assert result == {"error": "card not found", "query": "xyzxyzxyz"}
+
+
+@respx.mock
+async def test_get_card_by_name_exact(client):
+    respx.get(f"{SCRYFALL_BASE}/cards/named").mock(return_value=httpx.Response(200, json={
+        "name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
+        "oracle_text": "Deal 3.", "colors": ["R"], "cmc": 1.0,
+        "legalities": {}, "set": "leb", "image_uris": {}, "prices": {},
+    }))
+    result = await client.get_card_by_name("Lightning Bolt", fuzzy=False)
+    assert result["name"] == "Lightning Bolt"
+
 
 @respx.mock
 async def test_get_card_by_set(client):
