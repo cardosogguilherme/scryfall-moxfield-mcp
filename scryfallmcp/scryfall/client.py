@@ -93,3 +93,17 @@ class ScryfallClient:
             if e.response.status_code == 404:
                 return {"error": "card not found", "query": f"{set_code}/{collector_number}"}
             raise
+
+    async def get_cards_bulk(self, names: list[str]) -> list[dict]:
+        CHUNK_SIZE = 75
+        semaphore = asyncio.Semaphore(3)
+        chunks = [names[i:i + CHUNK_SIZE] for i in range(0, len(names), CHUNK_SIZE)]
+
+        async def fetch_chunk(chunk: list[str]) -> list[dict]:
+            async with semaphore:
+                payload = {"identifiers": [{"name": n} for n in chunk]}
+                data = await self._post("/cards/collection", payload)
+                return [_card_to_dict(c) for c in data.get("data", [])]
+
+        results = await asyncio.gather(*[fetch_chunk(c) for c in chunks])
+        return [card for batch in results for card in batch]

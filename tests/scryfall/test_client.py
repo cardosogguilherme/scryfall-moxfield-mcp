@@ -85,3 +85,59 @@ async def test_get_card_by_set(client):
     }))
     result = await client.get_card_by_set("leb", "1")
     assert result["name"] == "Black Lotus"
+
+
+@respx.mock
+async def test_get_cards_bulk_retries_on_429(client):
+    """Verifies that a 429 on the collection endpoint triggers a retry."""
+    call_count = 0
+
+    def handler(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(429, json={"object": "error", "code": "too_many_requests"})
+        return httpx.Response(200, json={"data": [
+            {"name": "Sol Ring", "mana_cost": "{1}", "type_line": "Artifact",
+             "oracle_text": "", "colors": [], "cmc": 1.0, "legalities": {},
+             "set": "lea", "image_uris": {}, "prices": {}}
+        ]})
+
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(side_effect=handler)
+    result = await client.get_cards_bulk(["Sol Ring"])
+    assert call_count == 2  # first call 429, second succeeds
+    assert result[0]["name"] == "Sol Ring"
+
+
+@respx.mock
+async def test_get_cards_bulk_single_chunk(client):
+    names = ["Lightning Bolt", "Counterspell"]
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(return_value=httpx.Response(200, json={
+        "data": [
+            {"name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
+             "oracle_text": "", "colors": ["R"], "cmc": 1.0, "legalities": {},
+             "set": "leb", "image_uris": {}, "prices": {}},
+            {"name": "Counterspell", "mana_cost": "{U}{U}", "type_line": "Instant",
+             "oracle_text": "", "colors": ["U"], "cmc": 2.0, "legalities": {},
+             "set": "leb", "image_uris": {}, "prices": {}},
+        ]
+    }))
+    result = await client.get_cards_bulk(names)
+    assert len(result) == 2
+    assert {c["name"] for c in result} == {"Lightning Bolt", "Counterspell"}
+
+
+@respx.mock
+async def test_get_cards_bulk_chunks_at_75(client):
+    """Verifies that 76 names produce exactly 2 API calls."""
+    names = [f"Card {i}" for i in range(76)]
+    call_count = 0
+
+    def handler(request):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(200, json={"data": []})
+
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(side_effect=handler)
+    await client.get_cards_bulk(names)
+    assert call_count == 2
