@@ -74,3 +74,22 @@ class ScryfallClient:
             if e.response.status_code == 404:
                 return {"error": "card not found", "query": query}
             raise
+
+    async def get_card_by_name(self, name: str, fuzzy: bool = True) -> dict:
+        param_key = "fuzzy" if fuzzy else "exact"
+        try:
+            data = await self._get("/cards/named", **{param_key: name})
+            return _card_to_dict(data)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {"error": "card not found", "query": name}
+            raise
+
+    async def get_card_by_set(self, set_code: str, collector_number: str) -> dict:
+        try:
+            data = await self._get(f"/cards/{set_code}/{collector_number}")
+            return _card_to_dict(data)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {"error": "card not found", "query": f"{set_code}/{collector_number}"}
+            raise

@@ -43,3 +43,32 @@ async def test_search_cards_404_returns_error(client):
     }))
     result = await client.search_cards("t:nonexistenttype12345")
     assert result == {"error": "card not found", "query": "t:nonexistenttype12345"}
+
+
+@respx.mock
+async def test_get_card_by_name_fuzzy(client):
+    respx.get(f"{SCRYFALL_BASE}/cards/named").mock(return_value=httpx.Response(200, json={
+        "name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
+        "oracle_text": "Deal 3.", "colors": ["R"], "cmc": 1.0,
+        "legalities": {}, "set": "leb", "image_uris": {}, "prices": {},
+    }))
+    result = await client.get_card_by_name("ligntning bolt", fuzzy=True)
+    assert result["name"] == "Lightning Bolt"
+
+@respx.mock
+async def test_get_card_by_name_not_found(client):
+    respx.get(f"{SCRYFALL_BASE}/cards/named").mock(return_value=httpx.Response(404, json={
+        "object": "error", "details": "Not found."
+    }))
+    result = await client.get_card_by_name("xyzxyzxyz")
+    assert result == {"error": "card not found", "query": "xyzxyzxyz"}
+
+@respx.mock
+async def test_get_card_by_set(client):
+    respx.get(f"{SCRYFALL_BASE}/cards/leb/1").mock(return_value=httpx.Response(200, json={
+        "name": "Black Lotus", "mana_cost": "{0}", "type_line": "Artifact",
+        "oracle_text": "Tap, Sacrifice Black Lotus: Add three mana.", "colors": [],
+        "cmc": 0.0, "legalities": {}, "set": "leb", "image_uris": {}, "prices": {},
+    }))
+    result = await client.get_card_by_set("leb", "1")
+    assert result["name"] == "Black Lotus"
