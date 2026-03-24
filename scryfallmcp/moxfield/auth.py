@@ -94,8 +94,7 @@ class CredentialManager:
             )
 
         cookies = {c["name"]: c["value"] for c in cookies_list}
-        ttl = int(os.getenv("CREDENTIALS_TTL_HOURS", str(DEFAULT_TTL_HOURS)))
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=DEFAULT_TTL_HOURS)
         creds = Credentials(token=captured_token, cookies=cookies, expires_at=expires_at)
         self.save(creds)
         return creds
