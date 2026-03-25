@@ -1,5 +1,6 @@
 import httpx
 from scryfallmcp.moxfield.auth import CredentialManager, Credentials
+from scryfallmcp.scryfall.client import ScryfallClient
 
 MOXFIELD_API = "https://api2.moxfield.com"
 
@@ -93,5 +94,29 @@ class MoxfieldClient:
         return deck
 
     async def _enrich_deck(self, deck: dict) -> dict:
-        # Implemented in Task 8
+        scryfall = ScryfallClient()
+
+        # Collect all unique card names across all boards
+        all_cards: list[dict] = []
+        for board in deck["boards"].values():
+            all_cards.extend(board)
+
+        unique_names = list({c["name"] for c in all_cards if c.get("name")})
+        scryfall_cards = await scryfall.get_cards_bulk(unique_names)
+        scryfall_by_name = {c["name"]: c for c in scryfall_cards if "name" in c}
+
+        total_usd = 0.0
+
+        for board in deck["boards"].values():
+            for card in board:
+                sc = scryfall_by_name.get(card["name"], {})
+                card.update({k: v for k, v in sc.items() if k != "name"})
+                price_str = sc.get("prices", {}).get("usd")
+                if price_str:
+                    try:
+                        total_usd += float(price_str) * card["quantity"]
+                    except (ValueError, TypeError):
+                        pass
+
+        deck["price_total_usd"] = f"{total_usd:.2f}"
         return deck

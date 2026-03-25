@@ -1,7 +1,7 @@
 import pytest
 import respx
 import httpx
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone, timedelta
 from scryfallmcp.moxfield.auth import Credentials
 from scryfallmcp.moxfield.client import MoxfieldClient
@@ -101,3 +101,36 @@ async def test_get_deck_401_triggers_reauth_and_retries(client, mock_creds):
     assert call_count == 2
     mock_creds.login.assert_called_once()
     assert result["name"] == "Mono-Red Burn"
+
+
+@respx.mock
+async def test_get_deck_with_enrichment(client):
+    respx.get(f"{MOXFIELD_API}/v2/decks/all/deck1").mock(
+        return_value=httpx.Response(200, json=MOCK_DECK_RESPONSE)
+    )
+
+    scryfall_data = [
+        {"name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
+         "oracle_text": "Deal 3 damage.", "colors": ["R"], "cmc": 1.0,
+         "legalities": {}, "set": "leb", "image_uris": {}, "prices": {"usd": "0.50"},
+         "collector_number": "61"},
+        {"name": "Goblin Guide", "mana_cost": "{R}", "type_line": "Creature",
+         "oracle_text": "Haste.", "colors": ["R"], "cmc": 1.0,
+         "legalities": {}, "set": "zen", "image_uris": {}, "prices": {"usd": "5.00"},
+         "collector_number": "134"},
+    ]
+
+    with patch(
+        "scryfallmcp.moxfield.client.ScryfallClient.get_cards_bulk",
+        new_callable=AsyncMock,
+        return_value=scryfall_data,
+    ):
+        result = await client.get_deck("deck1", enrich_with_scryfall=True)
+
+    mainboard = result["boards"]["mainboard"]
+    bolt = next(c for c in mainboard if c["name"] == "Lightning Bolt")
+    assert bolt["mana_cost"] == "{R}"
+    assert bolt["oracle_text"] == "Deal 3 damage."
+    assert bolt["prices"] == {"usd": "0.50"}
+    # 4 × $0.50 (Lightning Bolt) + 4 × $5.00 (Goblin Guide) = $22.00
+    assert result["price_total_usd"] == "22.00"
