@@ -88,6 +88,13 @@ Paste your token and cookies when prompted. This writes `credentials.json` with 
 
 Credentials last 24 hours by default (configurable via `CREDENTIALS_TTL_HOURS`). Re-run this script when they expire.
 
+To extend the TTL, set in `.env`:
+```
+CREDENTIALS_TTL_HOURS=168
+```
+
+> Whether it stays valid that long depends on Moxfield's server-side session timeout. If they invalidate your session, you'll need to re-run the script regardless of the TTL setting.
+
 ---
 
 ## Running the server
@@ -145,6 +152,25 @@ Add this to your Claude Desktop config (`~/Library/Application Support/Claude/cl
 ```
 
 Replace `/absolute/path/to/scryfallmcp` with the actual path on your machine.
+
+After editing the config, **restart Claude Desktop** (`Cmd+Q` then reopen). The tools will appear automatically in your conversations.
+
+### Renewing credentials
+
+When your Moxfield credentials expire, Claude will respond with:
+> `moxfield_auth_required: Moxfield credentials have expired. Run: python save_moxfield_credentials.py`
+
+To renew:
+1. Go to [moxfield.com/decks](https://www.moxfield.com/decks) in your browser
+2. Open DevTools (`F12`) → **Network** tab → filter by `api2` → refresh the page
+3. Click any request → **Headers** → **Request Headers** → copy `authorization`
+4. Run the script and paste the new token:
+   ```bash
+   cd /Users/guilherme.cardoso/Development/scryfallmcp
+   source .venv/bin/activate
+   python save_moxfield_credentials.py
+   ```
+5. Restart Claude Desktop
 
 ---
 
