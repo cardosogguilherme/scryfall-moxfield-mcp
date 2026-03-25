@@ -108,6 +108,123 @@ This opens the MCP Inspector at `http://localhost:5173`.
 
 ---
 
+## Docker
+
+### Build the image
+
+```bash
+docker build -t scryfallmcp .
+```
+
+### Run (stdio mode, for Claude)
+
+The server communicates over stdio. `credentials.json` is mounted from the host so it can be renewed without rebuilding the image.
+
+```bash
+docker run --rm -i \
+  -v /path/to/scryfallmcp/credentials.json:/app/credentials.json \
+  -e CREDENTIALS_TTL_HOURS=24 \
+  scryfallmcp
+```
+
+> **Note:** `credentials.json` must exist on the host before running. Follow the [Moxfield Authentication](#moxfield-authentication) steps to create it.
+
+### Claude Desktop integration (Docker)
+
+Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "scryfallmcp": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "/path/to/scryfallmcp/credentials.json:/app/credentials.json",
+        "-e", "CREDENTIALS_TTL_HOURS=24",
+        "scryfallmcp"
+      ]
+    }
+  }
+}
+```
+
+Replace the volume path with the absolute path to your local `credentials.json`.
+
+After editing the config, **restart Claude Desktop** (`Cmd+Q` then reopen).
+
+### Network deployment (NUC / home server)
+
+Run the server once on your NUC and connect to it from Claude on any machine on your network.
+
+**On the NUC:**
+
+```bash
+git clone <repo>
+cd scryfallmcp
+# Create credentials.json first (follow Moxfield Authentication steps above)
+docker compose up --build -d
+```
+
+The server starts in `streamable-http` mode and listens on port 8000.
+
+**On any other machine — Claude Desktop config:**
+
+```json
+{
+  "mcpServers": {
+    "scryfallmcp": {
+      "url": "http://<NUC_IP>:8000/mcp"
+    }
+  }
+}
+```
+
+Replace `<NUC_IP>` with your NUC's local IP address (e.g. `192.168.1.100`).
+
+> If your Claude Desktop version doesn't support `streamable-http`, change `docker-compose.yml` to `MCP_TRANSPORT: sse` and use `"url": "http://<NUC_IP>:8000/sse"` in the config instead.
+
+**Renewing credentials on the NUC:**
+
+Run `save_moxfield_credentials.py` on the NUC to update `credentials.json`. The running container will pick up the new file automatically via the volume mount — no restart needed.
+
+```bash
+cd scryfallmcp
+python save_moxfield_credentials.py
+```
+
+#### Deploying via Portainer
+
+If you manage your NUC with Portainer, deploy as a Stack instead of using `docker compose` directly.
+
+1. In the Portainer UI go to **Stacks → Add stack**
+2. Give it a name (e.g. `scryfallmcp`)
+3. Choose **Web editor** and paste the contents of `docker-compose.yml`:
+
+```yaml
+services:
+  scryfallmcp:
+    image: scryfallmcp
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /path/on/nuc/scryfallmcp/credentials.json:/app/credentials.json
+    environment:
+      MCP_TRANSPORT: streamable-http
+      FASTMCP_HOST: 0.0.0.0
+      CREDENTIALS_TTL_HOURS: 24
+```
+
+> Replace `/path/on/nuc/scryfallmcp/credentials.json` with the absolute path to your `credentials.json` on the NUC. Portainer does not resolve relative paths, so it must be absolute.
+
+4. Click **Deploy the stack**
+
+Portainer will build the image and start the container. You can redeploy after pulling new code via **Stacks → scryfallmcp → Editor → Update the stack**.
+
+---
+
 ## Testing
 
 ### Unit tests

@@ -1,0 +1,13 @@
+services:
+  scryfallmcp:
+    image: scryfallmcp
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./credentials.json:/app/credentials.json
+    environment:
+      MCP_TRANSPORT: streamable-http
+      FASTMCP_HOST: 0.0.0.0
+      CREDENTIALS_TTL_HOURS: 24
