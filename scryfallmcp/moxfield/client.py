@@ -55,7 +55,10 @@ class MoxfieldClient:
         """Convert raw Moxfield deck response into our unified deck object."""
         def parse_board(board_data: dict) -> list[dict]:
             return [
-                {"name": entry["card"]["name"], "quantity": entry["quantity"]}
+                {
+                    "name": entry.get("card", {}).get("name"),
+                    "quantity": entry.get("quantity", 0),
+                }
                 for entry in board_data.values()
             ]
 

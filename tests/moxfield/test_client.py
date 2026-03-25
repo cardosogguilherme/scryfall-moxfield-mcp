@@ -80,8 +80,6 @@ async def test_get_deck_404_returns_error(client):
 @respx.mock
 async def test_get_deck_401_triggers_reauth_and_retries(client, mock_creds):
     """On 401, the client calls login() and retries once with fresh credentials."""
-    from datetime import datetime, timezone, timedelta
-    from scryfallmcp.moxfield.auth import Credentials
     fresh_creds = Credentials(
         token="Bearer freshtoken",
         cookies={"_moxfield_session": "freshed"},
