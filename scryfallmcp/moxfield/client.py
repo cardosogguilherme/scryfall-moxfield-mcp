@@ -50,3 +50,45 @@ class MoxfieldClient:
             }
             for d in data.get("data", [])
         ]
+
+    def _parse_deck(self, raw: dict) -> dict:
+        """Convert raw Moxfield deck response into our unified deck object."""
+        def parse_board(board_data: dict) -> list[dict]:
+            return [
+                {"name": entry["card"]["name"], "quantity": entry["quantity"]}
+                for entry in board_data.values()
+            ]
+
+        return {
+            "id": raw.get("id"),
+            "name": raw.get("name"),
+            "format": raw.get("format"),
+            "description": raw.get("description", ""),
+            "author": raw.get("createdByUser", {}).get("userName"),
+            "boards": {
+                "mainboard": parse_board(raw.get("mainboard", {})),
+                "sideboard": parse_board(raw.get("sideboard", {})),
+                "commanders": parse_board(raw.get("commanders", {})),
+                "companions": parse_board(raw.get("companions", {})),
+            },
+            "price_total_usd": None,  # populated by enrichment
+        }
+
+    async def get_deck(self, deck_id: str, enrich_with_scryfall: bool = True) -> dict:
+        try:
+            raw = await self._get(f"/v2/decks/all/{deck_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {"error": "deck not found", "deck_id": deck_id}
+            raise
+
+        deck = self._parse_deck(raw)
+
+        if enrich_with_scryfall:
+            deck = await self._enrich_deck(deck)
+
+        return deck
+
+    async def _enrich_deck(self, deck: dict) -> dict:
+        # Implemented in Task 8
+        return deck
