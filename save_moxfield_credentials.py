@@ -37,7 +37,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-CREDENTIALS_PATH = Path("credentials.json")
+CREDENTIALS_PATH = Path(__file__).parent / "credentials.json"
 DEFAULT_TTL_HOURS = int(os.getenv("CREDENTIALS_TTL_HOURS", "24"))
 
 
