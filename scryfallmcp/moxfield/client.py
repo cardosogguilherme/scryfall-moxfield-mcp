@@ -5,9 +5,18 @@ MOXFIELD_API = "https://api2.moxfield.com"
 
 
 class MoxfieldClient:
-    def __init__(self, credential_manager: CredentialManager = None):
+    def __init__(self, credential_manager: CredentialManager | None = None):
         self._cred_manager = credential_manager or CredentialManager()
         self._http = httpx.AsyncClient(timeout=30.0)
+
+    async def close(self) -> None:
+        await self._http.aclose()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
 
     def _headers(self, creds: Credentials) -> dict:
         cookie_str = "; ".join(f"{k}={v}" for k, v in creds.cookies.items())
