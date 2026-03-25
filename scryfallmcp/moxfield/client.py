@@ -6,12 +6,18 @@ MOXFIELD_API = "https://api2.moxfield.com"
 
 
 class MoxfieldClient:
-    def __init__(self, credential_manager: CredentialManager | None = None):
+    def __init__(
+        self,
+        credential_manager: CredentialManager | None = None,
+        scryfall_client: "ScryfallClient | None" = None,
+    ):
         self._cred_manager = credential_manager or CredentialManager()
+        self._scryfall = scryfall_client or ScryfallClient()
         self._http = httpx.AsyncClient(timeout=30.0)
 
     async def close(self) -> None:
         await self._http.aclose()
+        await self._scryfall.close()
 
     async def __aenter__(self):
         return self
@@ -94,18 +100,17 @@ class MoxfieldClient:
         return deck
 
     async def _enrich_deck(self, deck: dict) -> dict:
-        scryfall = ScryfallClient()
-
         # Collect all unique card names across all boards
         all_cards: list[dict] = []
         for board in deck["boards"].values():
             all_cards.extend(board)
 
         unique_names = list({c["name"] for c in all_cards if c.get("name")})
-        scryfall_cards = await scryfall.get_cards_bulk(unique_names)
+        scryfall_cards = await self._scryfall.get_cards_bulk(unique_names)
         scryfall_by_name = {c["name"]: c for c in scryfall_cards if "name" in c}
 
         total_usd = 0.0
+        has_price = False
 
         for board in deck["boards"].values():
             for card in board:
@@ -115,8 +120,9 @@ class MoxfieldClient:
                 if price_str:
                     try:
                         total_usd += float(price_str) * card["quantity"]
+                        has_price = True
                     except (ValueError, TypeError):
                         pass
 
-        deck["price_total_usd"] = f"{total_usd:.2f}"
+        deck["price_total_usd"] = f"{total_usd:.2f}" if has_price else None
         return deck
