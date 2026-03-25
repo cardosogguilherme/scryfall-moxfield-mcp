@@ -59,7 +59,8 @@ class CredentialManager:
         captured_token: Optional[str] = None
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            # headless=False so Cloudflare Turnstile can auto-solve (it blocks headless bots)
+            browser = await p.chromium.launch(headless=False)
             context = await browser.new_context()
             page = await context.new_page()
 
@@ -72,13 +73,16 @@ class CredentialManager:
 
             page.on("request", on_request)
 
-            await page.goto("https://www.moxfield.com/account/login")
-            await page.fill('input[name="username"], input[type="email"]', username)
-            await page.fill('input[name="password"], input[type="password"]', password)
-            await page.click('button[type="submit"]')
+            await page.goto("https://www.moxfield.com/account/login", wait_until="domcontentloaded")
+            await asyncio.sleep(2)  # Let the SPA and Turnstile widget render
+            await page.fill('#username', username)
+            await page.fill('#password', password)
+            # Wait for Turnstile to enable the button before clicking (up to 30s)
+            await page.wait_for_selector('button:has-text("Sign In"):not([disabled])', timeout=30000)
+            await page.click('button:has-text("Sign In")')
 
-            # Wait until we're no longer on the login page (max 15s)
-            await page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+            # Wait until we're no longer on the login page (max 30s)
+            await page.wait_for_url(lambda url: "/login" not in url, timeout=30000)
 
             # Trigger an authenticated API call to capture the token
             await page.goto("https://www.moxfield.com/decks")
@@ -100,8 +104,16 @@ class CredentialManager:
         return creds
 
     async def get_valid_credentials(self) -> Credentials:
-        """Return valid credentials, triggering login if expired or missing."""
+        """Return valid credentials, or raise a clear error if missing/expired."""
         creds = self.load()
-        if creds is None or creds.is_expired():
-            creds = await self.login()
+        if creds is None:
+            raise RuntimeError(
+                "Moxfield credentials not found. "
+                "Run: python save_moxfield_credentials.py"
+            )
+        if creds.is_expired():
+            raise RuntimeError(
+                "Moxfield credentials have expired. "
+                "Run: python save_moxfield_credentials.py"
+            )
         return creds

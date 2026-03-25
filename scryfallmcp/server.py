@@ -48,12 +48,15 @@ async def get_cards_bulk(names: list[str]) -> list[dict]:
 # ── Moxfield Tools ──────────────────────────────────────────────────────────────
 
 @mcp.tool()
-async def get_user_decks(username: str) -> list[dict]:
+async def get_user_decks(username: str) -> list[dict] | dict:
     """List all decks for a Moxfield user.
 
     username: the display name / URL slug (e.g. 'johndoe' from moxfield.com/users/johndoe)
     """
-    return await _moxfield.get_user_decks(username)
+    try:
+        return await _moxfield.get_user_decks(username)
+    except RuntimeError as e:
+        return {"error": "moxfield_auth_required", "reason": str(e)}
 
 
 @mcp.tool()
@@ -63,7 +66,10 @@ async def get_deck(deck_id: str, enrich_with_scryfall: bool = True) -> dict:
     Returns full card list with quantities, board breakdown, and (optionally)
     Scryfall card data and price totals.
     """
-    return await _moxfield.get_deck(deck_id, enrich_with_scryfall=enrich_with_scryfall)
+    try:
+        return await _moxfield.get_deck(deck_id, enrich_with_scryfall=enrich_with_scryfall)
+    except RuntimeError as e:
+        return {"error": "moxfield_auth_required", "reason": str(e)}
 
 
 @mcp.tool()
