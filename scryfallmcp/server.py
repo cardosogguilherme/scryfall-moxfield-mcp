@@ -8,6 +8,8 @@ mcp = FastMCP("scryfallmcp")
 
 _scryfall = ScryfallClient()
 _cred_manager = CredentialManager()
+# Share the same ScryfallClient instance so deck enrichment reuses the HTTP connection pool
+# and the rate-limit semaphore in get_cards_bulk is shared across all callers.
 _moxfield = MoxfieldClient(credential_manager=_cred_manager, scryfall_client=_scryfall)
 
 
