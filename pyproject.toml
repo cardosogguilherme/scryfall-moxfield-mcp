@@ -9,7 +9,6 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]",
     "httpx",
-    "playwright",
     "tenacity",
     "python-dotenv",
 ]
