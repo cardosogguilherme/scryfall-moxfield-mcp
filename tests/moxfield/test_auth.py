@@ -45,6 +45,10 @@ def test_save_and_load_roundtrip(creds_file):
     assert not loaded.is_expired()
 
 
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32",
+    reason="chmod 600 is not enforced on Windows",
+)
 def test_save_sets_file_permissions(creds_file):
     manager = CredentialManager(creds_path=creds_file)
     expires = datetime.now(timezone.utc) + timedelta(hours=24)
