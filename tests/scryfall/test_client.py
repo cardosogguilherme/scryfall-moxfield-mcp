@@ -21,10 +21,10 @@ async def test_search_cards_returns_card_list(client):
             "type_line": "Instant",
             "oracle_text": "Lightning Bolt deals 3 damage to any target.",
             "colors": ["R"],
+            "color_identity": ["R"],
             "cmc": 1.0,
+            "keywords": [],
             "legalities": {"modern": "legal"},
-            "set": "leb",
-            "image_uris": {"normal": "https://example.com/img.jpg"},
             "prices": {"usd": "0.50"},
         }],
         "has_more": False,
@@ -49,8 +49,8 @@ async def test_search_cards_404_returns_error(client):
 async def test_get_card_by_name_fuzzy(client):
     respx.get(f"{SCRYFALL_BASE}/cards/named").mock(return_value=httpx.Response(200, json={
         "name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
-        "oracle_text": "Deal 3.", "colors": ["R"], "cmc": 1.0,
-        "legalities": {}, "set": "leb", "image_uris": {}, "prices": {},
+        "oracle_text": "Deal 3.", "colors": ["R"], "color_identity": ["R"],
+        "cmc": 1.0, "keywords": [], "legalities": {}, "prices": {},
     }))
     result = await client.get_card_by_name("ligntning bolt", fuzzy=True)
     assert result["name"] == "Lightning Bolt"
@@ -69,8 +69,8 @@ async def test_get_card_by_name_not_found(client):
 async def test_get_card_by_name_exact(client):
     respx.get(f"{SCRYFALL_BASE}/cards/named").mock(return_value=httpx.Response(200, json={
         "name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
-        "oracle_text": "Deal 3.", "colors": ["R"], "cmc": 1.0,
-        "legalities": {}, "set": "leb", "image_uris": {}, "prices": {},
+        "oracle_text": "Deal 3.", "colors": ["R"], "color_identity": ["R"],
+        "cmc": 1.0, "keywords": [], "legalities": {}, "prices": {},
     }))
     result = await client.get_card_by_name("Lightning Bolt", fuzzy=False)
     assert result["name"] == "Lightning Bolt"
@@ -81,7 +81,7 @@ async def test_get_card_by_set(client):
     respx.get(f"{SCRYFALL_BASE}/cards/leb/1").mock(return_value=httpx.Response(200, json={
         "name": "Black Lotus", "mana_cost": "{0}", "type_line": "Artifact",
         "oracle_text": "Tap, Sacrifice Black Lotus: Add three mana.", "colors": [],
-        "cmc": 0.0, "legalities": {}, "set": "leb", "image_uris": {}, "prices": {},
+        "color_identity": [], "cmc": 0.0, "keywords": [], "legalities": {}, "prices": {},
     }))
     result = await client.get_card_by_set("leb", "1")
     assert result["name"] == "Black Lotus"
@@ -99,8 +99,8 @@ async def test_get_cards_bulk_retries_on_429(client):
             return httpx.Response(429, json={"object": "error", "code": "too_many_requests"})
         return httpx.Response(200, json={"data": [
             {"name": "Sol Ring", "mana_cost": "{1}", "type_line": "Artifact",
-             "oracle_text": "", "colors": [], "cmc": 1.0, "legalities": {},
-             "set": "lea", "image_uris": {}, "prices": {}}
+             "oracle_text": "", "colors": [], "color_identity": [], "cmc": 1.0,
+             "keywords": [], "legalities": {}, "prices": {}}
         ]})
 
     respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(side_effect=handler)
@@ -115,11 +115,11 @@ async def test_get_cards_bulk_single_chunk(client):
     respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(return_value=httpx.Response(200, json={
         "data": [
             {"name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
-             "oracle_text": "", "colors": ["R"], "cmc": 1.0, "legalities": {},
-             "set": "leb", "image_uris": {}, "prices": {}},
+             "oracle_text": "", "colors": ["R"], "color_identity": ["R"], "cmc": 1.0,
+             "keywords": [], "legalities": {}, "prices": {}},
             {"name": "Counterspell", "mana_cost": "{U}{U}", "type_line": "Instant",
-             "oracle_text": "", "colors": ["U"], "cmc": 2.0, "legalities": {},
-             "set": "leb", "image_uris": {}, "prices": {}},
+             "oracle_text": "", "colors": ["U"], "color_identity": ["U"], "cmc": 2.0,
+             "keywords": [], "legalities": {}, "prices": {}},
         ]
     }))
     result = await client.get_cards_bulk(names)

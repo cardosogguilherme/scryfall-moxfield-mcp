@@ -106,6 +106,34 @@ async def test_get_deck_401_triggers_reauth_and_retries(client, mock_creds):
 
 
 @respx.mock
+async def test_find_deck_returns_matching_decks(client):
+    respx.get(f"{MOXFIELD_API}/v2/users/johndoe/decks").mock(return_value=httpx.Response(200, json={
+        "data": [
+            {"publicId": "deck1", "name": "Mono-Red Burn", "format": "modern", "lastUpdatedAtUtc": "2026-01-01T00:00:00Z"},
+            {"publicId": "deck2", "name": "Blue Control", "format": "legacy", "lastUpdatedAtUtc": "2026-01-02T00:00:00Z"},
+            {"publicId": "deck3", "name": "Red-Green Ramp", "format": "standard", "lastUpdatedAtUtc": "2026-01-03T00:00:00Z"},
+        ]
+    }))
+    result = await client.find_deck("red", "johndoe")
+    assert len(result) == 2
+    names = {d["name"] for d in result}
+    assert "Mono-Red Burn" in names
+    assert "Red-Green Ramp" in names
+    assert "Blue Control" not in names
+
+
+@respx.mock
+async def test_find_deck_no_match_returns_empty(client):
+    respx.get(f"{MOXFIELD_API}/v2/users/johndoe/decks").mock(return_value=httpx.Response(200, json={
+        "data": [
+            {"publicId": "deck1", "name": "Mono-Red Burn", "format": "modern", "lastUpdatedAtUtc": "2026-01-01T00:00:00Z"},
+        ]
+    }))
+    result = await client.find_deck("eldrazi", "johndoe")
+    assert result == []
+
+
+@respx.mock
 async def test_get_deck_with_enrichment(client):
     respx.get(f"{MOXFIELD_API}/v2/decks/all/deck1").mock(
         return_value=httpx.Response(200, json=MOCK_DECK_RESPONSE)
@@ -113,13 +141,13 @@ async def test_get_deck_with_enrichment(client):
 
     scryfall_data = [
         {"name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
-         "oracle_text": "Deal 3 damage.", "colors": ["R"], "cmc": 1.0,
-         "legalities": {}, "set": "leb", "image_uris": {}, "prices": {"usd": "0.50"},
-         "collector_number": "61"},
-        {"name": "Goblin Guide", "mana_cost": "{R}", "type_line": "Creature",
-         "oracle_text": "Haste.", "colors": ["R"], "cmc": 1.0,
-         "legalities": {}, "set": "zen", "image_uris": {}, "prices": {"usd": "5.00"},
-         "collector_number": "134"},
+         "oracle_text": "Deal 3 damage.", "colors": ["R"], "color_identity": ["R"],
+         "cmc": 1.0, "power": None, "toughness": None, "loyalty": None,
+         "keywords": [], "legalities": {}, "prices": {"usd": "0.50"}},
+        {"name": "Goblin Guide", "mana_cost": "{R}", "type_line": "Creature — Goblin Scout",
+         "oracle_text": "Haste.", "colors": ["R"], "color_identity": ["R"],
+         "cmc": 1.0, "power": "2", "toughness": "2", "loyalty": None,
+         "keywords": ["Haste"], "legalities": {}, "prices": {"usd": "5.00"}},
     ]
 
     client._scryfall.get_cards_bulk.return_value = scryfall_data

@@ -11,20 +11,19 @@ def _is_rate_limited(exc: BaseException) -> bool:
 
 
 def _card_to_dict(card: dict) -> dict:
-    """Extract the fields we care about from a raw Scryfall card object."""
     return {
         "name": card.get("name"),
         "mana_cost": card.get("mana_cost"),
         "type_line": card.get("type_line"),
         "oracle_text": card.get("oracle_text"),
         "colors": card.get("colors", []),
+        "color_identity": card.get("color_identity", []),
         "cmc": card.get("cmc"),
+        "power": card.get("power"),
+        "toughness": card.get("toughness"),
+        "loyalty": card.get("loyalty"),
+        "keywords": card.get("keywords", []),
         "legalities": card.get("legalities", {}),
-        "set": card.get("set"),
-        "collector_number": card.get("collector_number"),
-        "image_uris": card.get("image_uris") or (
-            card.get("card_faces", [{}])[0].get("image_uris")
-        ),
         "prices": card.get("prices", {}),
     }
 

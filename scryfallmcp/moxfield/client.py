@@ -46,6 +46,11 @@ class MoxfieldClient:
         r.raise_for_status()
         return r.json()
 
+    async def find_deck(self, name_query: str, username: str) -> list[dict]:
+        decks = await self.get_user_decks(username)
+        query_lower = name_query.lower()
+        return [d for d in decks if query_lower in (d.get("name") or "").lower()]
+
     async def get_user_decks(self, username: str) -> list[dict]:
         data = await self._get(f"/v2/users/{username}/decks")
         return [
