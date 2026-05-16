@@ -114,7 +114,7 @@ class RulingsClient:
             "definitions": matches,
         }
 
-    async def get_card_rulings(self, card_name: str) -> list[dict] | dict:
+    async def get_card_rulings(self, card_name: str, limit: int = 5) -> list[dict] | dict:
         """Return official rulings for a card from Scryfall."""
         # First get the card to find its ID
         card = await self._scryfall.get_card_by_name(card_name, fuzzy=True)
@@ -133,10 +133,10 @@ class RulingsClient:
         # rulings_uri is a full URL; strip the base to get the path
         path = rulings_uri.replace("https://api.scryfall.com", "")
         data = await self._scryfall._get(path)
-        rulings = [
-            {"date": r.get("published_at"), "text": r.get("comment")}
-            for r in data.get("data", [])
-        ]
+        raw_rulings = data.get("data", [])
+        if limit:
+            raw_rulings = raw_rulings[-limit:]  # most recent first
+        rulings = [{"date": r.get("published_at"), "text": r.get("comment")} for r in raw_rulings]
         return {"card": card_name, "rulings": rulings}
 
     async def explain_interaction(

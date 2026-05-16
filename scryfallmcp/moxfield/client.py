@@ -89,7 +89,7 @@ class MoxfieldClient:
             "price_total_usd": None,  # populated by enrichment
         }
 
-    async def get_deck(self, deck_id: str, enrich_with_scryfall: bool = True) -> dict:
+    async def get_deck(self, deck_id: str, enrich_with_scryfall: "str | bool" = "lean") -> dict:
         try:
             raw = await self._get(f"/v2/decks/all/{deck_id}")
         except httpx.HTTPStatusError as e:
@@ -100,18 +100,22 @@ class MoxfieldClient:
         deck = self._parse_deck(raw)
 
         if enrich_with_scryfall:
-            deck = await self._enrich_deck(deck)
+            full = enrich_with_scryfall == "full"
+            deck = await self._enrich_deck(deck, full=full)
 
         return deck
 
-    async def _enrich_deck(self, deck: dict) -> dict:
-        # Collect all unique card names across all boards
+    async def _enrich_deck(self, deck: dict, *, full: bool = False) -> dict:
         all_cards: list[dict] = []
         for board in deck["boards"].values():
             all_cards.extend(board)
 
         unique_names = list({c["name"] for c in all_cards if c.get("name")})
-        scryfall_cards = await self._scryfall.get_cards_bulk(unique_names)
+        scryfall_cards = await self._scryfall.get_cards_bulk(
+            unique_names,
+            include_all_legalities=full,
+            include_all_prices=full,
+        )
         scryfall_by_name = {c["name"]: c for c in scryfall_cards if "name" in c}
 
         total_usd = 0.0
@@ -121,7 +125,7 @@ class MoxfieldClient:
             for card in board:
                 sc = scryfall_by_name.get(card["name"], {})
                 card.update({k: v for k, v in sc.items() if k != "name"})
-                price_str = sc.get("prices", {}).get("usd")
+                price_str = sc.get("price_usd") if not full else (sc.get("prices") or {}).get("usd")
                 if price_str:
                     try:
                         total_usd += float(price_str) * card["quantity"]

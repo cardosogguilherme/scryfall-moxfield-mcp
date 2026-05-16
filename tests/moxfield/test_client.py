@@ -141,23 +141,24 @@ async def test_get_deck_with_enrichment(client):
 
     scryfall_data = [
         {"name": "Lightning Bolt", "mana_cost": "{R}", "type_line": "Instant",
-         "oracle_text": "Deal 3 damage.", "colors": ["R"], "color_identity": ["R"],
-         "cmc": 1.0, "power": None, "toughness": None, "loyalty": None,
-         "keywords": [], "legalities": {}, "prices": {"usd": "0.50"}},
+         "oracle_text": "Deal 3 damage.", "color_identity": ["R"],
+         "cmc": 1.0, "keywords": [], "commander_legal": True,
+         "set": "leb", "rarity": "common", "price_usd": "0.50"},
         {"name": "Goblin Guide", "mana_cost": "{R}", "type_line": "Creature — Goblin Scout",
-         "oracle_text": "Haste.", "colors": ["R"], "color_identity": ["R"],
-         "cmc": 1.0, "power": "2", "toughness": "2", "loyalty": None,
-         "keywords": ["Haste"], "legalities": {}, "prices": {"usd": "5.00"}},
+         "oracle_text": "Haste.", "color_identity": ["R"],
+         "cmc": 1.0, "power": "2", "toughness": "2",
+         "keywords": ["Haste"], "commander_legal": True,
+         "set": "zen", "rarity": "rare", "price_usd": "5.00"},
     ]
 
     client._scryfall.get_cards_bulk.return_value = scryfall_data
-    result = await client.get_deck("deck1", enrich_with_scryfall=True)
+    result = await client.get_deck("deck1", enrich_with_scryfall="lean")
 
     mainboard = result["boards"]["mainboard"]
     bolt = next(c for c in mainboard if c["name"] == "Lightning Bolt")
     assert bolt["mana_cost"] == "{R}"
     assert bolt["oracle_text"] == "Deal 3 damage."
-    assert bolt["prices"] == {"usd": "0.50"}
+    assert bolt["price_usd"] == "0.50"
     assert bolt["name"] == "Lightning Bolt"  # name not overwritten
     guide = next(c for c in mainboard if c["name"] == "Goblin Guide")
     assert guide["mana_cost"] == "{R}"

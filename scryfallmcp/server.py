@@ -1,4 +1,3 @@
-# scryfallmcp/server.py
 from typing import Annotated, Literal
 from mcp.server.fastmcp import FastMCP
 from scryfallmcp.scryfall.client import ScryfallClient
@@ -12,8 +11,6 @@ mcp = FastMCP("scryfallmcp")
 
 _scryfall = ScryfallClient()
 _cred_manager = CredentialManager()
-# Share the same ScryfallClient instance so deck enrichment reuses the HTTP connection pool
-# and the rate-limit semaphore in get_cards_bulk is shared across all callers.
 _moxfield = MoxfieldClient(credential_manager=_cred_manager, scryfall_client=_scryfall)
 _edhrec = EDHRecClient()
 _spellbook = CommanderSpellbookClient()
@@ -32,27 +29,32 @@ async def search_cards(
 
 
 @mcp.tool()
-async def get_card_by_name(
-    name: Annotated[str, "Card name"],
-    fuzzy: Annotated[bool, "Use fuzzy matching; set False for exact name"] = True,
-) -> dict:
-    """Fetch a single card by name."""
-    return await _scryfall.get_card_by_name(name, fuzzy=fuzzy)
-
-
-@mcp.tool()
 async def get_card_by_set(
     set_code: Annotated[str, "Three-letter set code, e.g. 'mh3'"],
     collector_number: Annotated[str, "Collector number, e.g. '237'"],
+    include_all_legalities: Annotated[bool, "Return full legalities object instead of commander_legal boolean"] = False,
+    include_all_prices: Annotated[bool, "Return full prices object instead of price_usd string"] = False,
 ) -> dict:
     """Fetch a specific card printing by set code and collector number."""
-    return await _scryfall.get_card_by_set(set_code, collector_number)
+    return await _scryfall.get_card_by_set(
+        set_code, collector_number,
+        include_all_legalities=include_all_legalities,
+        include_all_prices=include_all_prices,
+    )
 
 
 @mcp.tool()
-async def get_cards_bulk(names: list[str]) -> list[dict]:
+async def get_cards_bulk(
+    names: list[str],
+    include_all_legalities: Annotated[bool, "Return full legalities object instead of commander_legal boolean"] = False,
+    include_all_prices: Annotated[bool, "Return full prices object instead of price_usd string"] = False,
+) -> list[dict]:
     """Fetch multiple cards by name in one call; batching is handled automatically."""
-    return await _scryfall.get_cards_bulk(names)
+    return await _scryfall.get_cards_bulk(
+        names,
+        include_all_legalities=include_all_legalities,
+        include_all_prices=include_all_prices,
+    )
 
 
 # ── Moxfield ────────────────────────────────────────────────────────────────────
@@ -60,9 +62,12 @@ async def get_cards_bulk(names: list[str]) -> list[dict]:
 @mcp.tool()
 async def get_user_decks(
     username: Annotated[str, "Moxfield display name / URL slug, e.g. 'johndoe'"],
+    name_filter: Annotated[str | None, "Case-insensitive name fragment; returns only matching decks when provided"] = None,
 ) -> list[dict] | dict:
-    """List all decks for a Moxfield user."""
+    """List a user's Moxfield decks, optionally filtered by name fragment."""
     try:
+        if name_filter:
+            return await _moxfield.find_deck(name_filter, username)
         return await _moxfield.get_user_decks(username)
     except RuntimeError as e:
         return {"error": "moxfield_auth_required", "reason": str(e)}
@@ -71,35 +76,16 @@ async def get_user_decks(
 @mcp.tool()
 async def get_deck(
     deck_id: Annotated[str, "Public deck ID from the Moxfield URL"],
-    enrich_with_scryfall: Annotated[bool, "Merge Scryfall card data and compute price total"] = True,
+    enrich_with_scryfall: Annotated[
+        Literal["lean", "full", False],
+        "'lean' (default): trimmed Scryfall data, commander_legal + price_usd. 'full': all fields. False: skip enrichment.",
+    ] = "lean",
 ) -> dict:
-    """Fetch a Moxfield deck by public ID, optionally enriched with Scryfall card data and prices."""
+    """Fetch a Moxfield deck by public ID, enriched with Scryfall card data."""
     try:
         return await _moxfield.get_deck(deck_id, enrich_with_scryfall=enrich_with_scryfall)
     except RuntimeError as e:
         return {"error": "moxfield_auth_required", "reason": str(e)}
-
-
-@mcp.tool()
-async def moxfield_find_deck(
-    name_query: Annotated[str, "Case-insensitive name fragment to search for"],
-    username: Annotated[str, "Moxfield display name / URL slug"],
-) -> list[dict] | dict:
-    """Search a user's Moxfield decks by name fragment; returns ID + metadata without Scryfall enrichment."""
-    try:
-        return await _moxfield.find_deck(name_query, username)
-    except RuntimeError as e:
-        return {"error": "moxfield_auth_required", "reason": str(e)}
-
-
-@mcp.tool()
-async def refresh_moxfield_credentials() -> dict:
-    """Re-authenticate the Moxfield session; use if calls return auth errors."""
-    try:
-        creds = await _cred_manager.login()
-        return {"status": "success", "expires_at": creds.expires_at.isoformat()}
-    except Exception as e:
-        return {"error": "moxfield_auth_failed", "reason": str(e)}
 
 
 # ── EDHREC ─────────────────────────────────────────────────────────────────────
@@ -210,9 +196,12 @@ async def get_keyword_definition(
 
 
 @mcp.tool()
-async def get_card_rulings(card_name: str) -> dict:
-    """Return official Scryfall rulings for a card with publication dates."""
-    return await _rulings.get_card_rulings(card_name)
+async def get_card_rulings(
+    card_name: str,
+    limit: Annotated[int, "Maximum number of most-recent rulings to return; 0 for all"] = 5,
+) -> dict:
+    """Return official Scryfall rulings for a card, most recent first."""
+    return await _rulings.get_card_rulings(card_name, limit=limit)
 
 
 @mcp.tool()
@@ -225,16 +214,27 @@ async def explain_interaction(
     return await _rulings.explain_interaction(card_a, card_b, scenario=scenario)
 
 
-@mcp.tool()
-async def rules_cache_status() -> dict:
-    """Return whether the Comprehensive Rules are cached and how many entries are loaded."""
-    return _rulings.cache_status()
-
+# ── Admin ───────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
-async def refresh_comprehensive_rules() -> dict:
-    """Clear the cached Comprehensive Rules; forces a re-fetch on next use."""
-    return await _rulings.refresh_rules()
+async def admin_action(
+    action: Annotated[
+        Literal["refresh_rules", "rules_cache_status", "refresh_moxfield_credentials"],
+        "Admin action: refresh Comprehensive Rules cache, check rules cache status, or re-authenticate Moxfield",
+    ],
+) -> dict:
+    """Perform an administrative action: refresh caches or re-authenticate Moxfield."""
+    if action == "refresh_rules":
+        return await _rulings.refresh_rules()
+    if action == "rules_cache_status":
+        return _rulings.cache_status()
+    if action == "refresh_moxfield_credentials":
+        try:
+            creds = await _cred_manager.login()
+            return {"status": "success", "expires_at": creds.expires_at.isoformat()}
+        except Exception as e:
+            return {"error": "moxfield_auth_failed", "reason": str(e)}
+    return {"error": "unknown_action", "action": action}
 
 
 def main():
