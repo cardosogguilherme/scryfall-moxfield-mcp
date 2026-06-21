@@ -1,0 +1,5 @@
+mcp[cli]==1.27.0
+httpx==0.28.1
+tenacity==9.1.4
+python-dotenv==1.2.2
+uvicorn==0.44.0

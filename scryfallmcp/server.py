@@ -237,10 +237,18 @@ async def admin_action(
     return {"error": "unknown_action", "action": action}
 
 
+# Module-level ASGI app for Streamable-HTTP deployment (mounted at /mcp).
+http_app = mcp.streamable_http_app()
+
+
 def main():
     import os
     transport = os.getenv("MCP_TRANSPORT", "stdio")
-    mcp.run(transport=transport)
+    if transport == "streamable-http":
+        import uvicorn
+        uvicorn.run(http_app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    else:
+        mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

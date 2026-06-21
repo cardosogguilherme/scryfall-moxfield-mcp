@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: moxfield-mcp
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn scryfallmcp.server:http_app --host 0.0.0.0 --port $PORT
