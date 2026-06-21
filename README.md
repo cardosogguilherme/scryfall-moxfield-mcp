@@ -226,13 +226,13 @@ Portainer will build the image and start the container. You can redeploy after p
 
 ## Render (public HTTP deployment)
 
-The server is deployed to Render as a public Streamable-HTTP endpoint so it can be added to **claude.ai** as a custom connector (no local install needed):
+The server can be deployed to Render as a public Streamable-HTTP endpoint so it can be added to **claude.ai** as a custom connector (no local install needed). After deploying, your endpoint is:
 
 ```
 https://<your-service-name>.onrender.com/mcp
 ```
 
-Add it in claude.ai via **Customize → Connectors → Add custom connector** using the URL above (no trailing slash — the endpoint is an exact-match route).
+Add it in claude.ai via **Customize → Connectors → Add custom connector** using your endpoint URL (no trailing slash — the endpoint is an exact-match route).
 
 ### How it's wired
 
