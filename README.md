@@ -224,6 +224,42 @@ Portainer will build the image and start the container. You can redeploy after p
 
 ---
 
+## Render (public HTTP deployment)
+
+The server is deployed to Render as a public Streamable-HTTP endpoint so it can be added to **claude.ai** as a custom connector (no local install needed):
+
+```
+https://<your-service-name>.onrender.com/mcp
+```
+
+Add it in claude.ai via **Customize → Connectors → Add custom connector** using the URL above (no trailing slash — the endpoint is an exact-match route).
+
+### How it's wired
+
+- **`render.yaml`** (repo root) — Render blueprint: free-tier web service that runs `uvicorn scryfallmcp.server:http_app --host 0.0.0.0 --port $PORT`.
+- **`requirements.txt`** (repo root) — pinned runtime deps for the Render build (`mcp[cli]`, `httpx`, `tenacity`, `python-dotenv`, `uvicorn`). Playwright is intentionally excluded.
+- **`scryfallmcp/server.py`** — exposes a module-level ASGI app, `http_app = mcp.streamable_http_app()` (mounted at `/mcp`), and `main()` serves it via uvicorn when `MCP_TRANSPORT=streamable-http`. `stdio` remains the default for Claude Desktop.
+- DNS-rebinding protection is disabled via `TransportSecuritySettings(enable_dns_rebinding_protection=False)`. FastMCP auto-enables it for localhost binds, which makes it reject the external `*.onrender.com` Host header with `421 Invalid Host header`. Disabling it is correct for a public hosted endpoint.
+
+### What works in the cloud
+
+Scryfall, EDHREC, Commander Spellbook, and Rulings tools work fully — they need no auth. The **Moxfield tools** (`get_user_decks`, `get_deck`) return `{"error": "moxfield_auth_required"}` because `credentials.json` is gitignored and never reaches Render, and `admin_action: refresh_moxfield_credentials` can't run (no headful browser on free tier). Use the local/Docker deployment for Moxfield access. Wiring a Bearer token via a Render secret would be a separate follow-up.
+
+> Render's free tier spins down when idle — the first request after a quiet period cold-starts (~30–60s). This is expected, not a bug.
+
+### Deploying
+
+Render auto-redeploys on every push to `main` (it reads `render.yaml`). To create the service initially: Render → **New + → Blueprint** → connect this repo → it reads `render.yaml` → instance type **Free** → create.
+
+### Local HTTP run (mirrors the Render setup)
+
+```bash
+MCP_TRANSPORT=streamable-http PORT=8080 python -m scryfallmcp.server
+# then GET http://localhost:8080/mcp should return 406 (live), not 404
+```
+
+---
+
 ## Testing
 
 ### Unit tests
