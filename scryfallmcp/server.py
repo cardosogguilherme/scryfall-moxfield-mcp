@@ -1,5 +1,6 @@
 from typing import Annotated, Literal
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from scryfallmcp.scryfall.client import ScryfallClient
 from scryfallmcp.moxfield.client import MoxfieldClient
 from scryfallmcp.moxfield.auth import CredentialManager
@@ -7,7 +8,12 @@ from scryfallmcp.edhrec.client import EDHRecClient
 from scryfallmcp.commander_spellbook.client import CommanderSpellbookClient
 from scryfallmcp.rulings.client import RulingsClient
 
-mcp = FastMCP("scryfallmcp")
+# DNS-rebinding protection guards localhost servers; disable it so the public
+# Render deployment accepts its external Host header (e.g. *.onrender.com).
+mcp = FastMCP(
+    "scryfallmcp",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 _scryfall = ScryfallClient()
 _cred_manager = CredentialManager()
