@@ -2,8 +2,6 @@ from typing import Annotated, Literal
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from scryfallmcp.scryfall.client import ScryfallClient
-from scryfallmcp.moxfield.client import MoxfieldClient
-from scryfallmcp.moxfield.auth import CredentialManager
 from scryfallmcp.edhrec.client import EDHRecClient
 from scryfallmcp.commander_spellbook.client import CommanderSpellbookClient
 from scryfallmcp.rulings.client import RulingsClient
@@ -16,8 +14,6 @@ mcp = FastMCP(
 )
 
 _scryfall = ScryfallClient()
-_cred_manager = CredentialManager()
-_moxfield = MoxfieldClient(credential_manager=_cred_manager, scryfall_client=_scryfall)
 _edhrec = EDHRecClient()
 _spellbook = CommanderSpellbookClient()
 _rulings = RulingsClient(scryfall_client=_scryfall)
@@ -61,37 +57,6 @@ async def get_cards_bulk(
         include_all_legalities=include_all_legalities,
         include_all_prices=include_all_prices,
     )
-
-
-# ── Moxfield ────────────────────────────────────────────────────────────────────
-
-@mcp.tool()
-async def get_user_decks(
-    username: Annotated[str, "Moxfield display name / URL slug, e.g. 'johndoe'"],
-    name_filter: Annotated[str | None, "Case-insensitive name fragment; returns only matching decks when provided"] = None,
-) -> list[dict] | dict:
-    """List a user's Moxfield decks, optionally filtered by name fragment."""
-    try:
-        if name_filter:
-            return await _moxfield.find_deck(name_filter, username)
-        return await _moxfield.get_user_decks(username)
-    except RuntimeError as e:
-        return {"error": "moxfield_auth_required", "reason": str(e)}
-
-
-@mcp.tool()
-async def get_deck(
-    deck_id: Annotated[str, "Public deck ID from the Moxfield URL"],
-    enrich_with_scryfall: Annotated[
-        Literal["lean", "full", False],
-        "'lean' (default): trimmed Scryfall data, commander_legal + price_usd. 'full': all fields. False: skip enrichment.",
-    ] = "lean",
-) -> dict:
-    """Fetch a Moxfield deck by public ID, enriched with Scryfall card data."""
-    try:
-        return await _moxfield.get_deck(deck_id, enrich_with_scryfall=enrich_with_scryfall)
-    except RuntimeError as e:
-        return {"error": "moxfield_auth_required", "reason": str(e)}
 
 
 # ── EDHREC ─────────────────────────────────────────────────────────────────────
@@ -225,21 +190,15 @@ async def explain_interaction(
 @mcp.tool()
 async def admin_action(
     action: Annotated[
-        Literal["refresh_rules", "rules_cache_status", "refresh_moxfield_credentials"],
-        "Admin action: refresh Comprehensive Rules cache, check rules cache status, or re-authenticate Moxfield",
+        Literal["refresh_rules", "rules_cache_status"],
+        "Admin action: refresh Comprehensive Rules cache or check rules cache status",
     ],
 ) -> dict:
-    """Perform an administrative action: refresh caches or re-authenticate Moxfield."""
+    """Perform an administrative action: refresh or check the rules cache."""
     if action == "refresh_rules":
         return await _rulings.refresh_rules()
     if action == "rules_cache_status":
         return _rulings.cache_status()
-    if action == "refresh_moxfield_credentials":
-        try:
-            creds = await _cred_manager.login()
-            return {"status": "success", "expires_at": creds.expires_at.isoformat()}
-        except Exception as e:
-            return {"error": "moxfield_auth_failed", "reason": str(e)}
     return {"error": "unknown_action", "action": action}
 
 

@@ -10,7 +10,6 @@ dependencies = [
     "mcp[cli]",
     "httpx",
     "tenacity",
-    "python-dotenv",
 ]
 
 [project.optional-dependencies]

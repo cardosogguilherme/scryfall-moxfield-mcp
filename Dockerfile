@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -e .
 ENV FASTMCP_HOST=0.0.0.0
 EXPOSE 8000
 
-# credentials.json is NOT baked into the image — mount it at runtime
 # MCP_TRANSPORT defaults to "stdio"; set to "streamable-http" or "sse" for network mode
 
 CMD ["python", "-m", "scryfallmcp.server"]

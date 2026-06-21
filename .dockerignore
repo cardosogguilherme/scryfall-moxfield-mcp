@@ -5,9 +5,7 @@ __pycache__/
 dist/
 .git/
 .env
-credentials.json
 .pytest_cache/
 tests/
 docs/
 README.md
-save_moxfield_credentials.py
