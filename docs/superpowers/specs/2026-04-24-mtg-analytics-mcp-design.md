@@ -15,7 +15,7 @@ The six analytics tools in `scryfallmcp/deck_analytics/` are conceptually differ
 
 - Eliminates the Scryfall dependency from the analytics layer entirely
 - Makes each server independently testable without mocking the other
-- Lets the analytics server be registered, updated, or replaced without touching the Scryfall/Moxfield/EDHREC server
+- Lets the analytics server be registered, updated, or replaced without touching the Scryfall/EDHREC server
 
 ---
 
@@ -79,7 +79,7 @@ Three deletions, nothing else:
 2. Remove `tests/deck_analytics/` (entire directory)
 3. Remove 6 analytics tools, their imports, and the `_deck_analytics` instance from `server.py`
 
-All other modules (edhrec, commander_spellbook, rulings, scryfall, moxfield) are untouched.
+All other modules (edhrec, commander_spellbook, rulings, scryfall) are untouched.
 
 ---
 
@@ -93,4 +93,4 @@ Tests move from `tests/deck_analytics/test_analytics.py` in `scryfallmcp` to `te
 
 - No shared library (`mtg-analytics-core`) — two consumers doesn't justify a third artifact
 - No field-typed card schemas — full card dicts from `get_cards_bulk` are always available
-- No changes to EDHREC, Commander Spellbook, Rulings, Scryfall, or Moxfield modules
+- No changes to EDHREC, Commander Spellbook, Rulings, or Scryfall modules

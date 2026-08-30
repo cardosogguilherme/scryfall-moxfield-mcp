@@ -43,14 +43,6 @@
 | `cache_status` | `()` | Return the timestamp of the cached rules (new — avoids blind refresh). |
 | `refresh_cache` | `()` | Force a re-fetch of the Comprehensive Rules. |
 
-### Namespace: `scryfall.moxfield`
-| Tool | Signature hint | One-line summary |
-|------|---------------|-----------------|
-| `get_deck` | `(deck_id)` | Fetch a Moxfield deck by public ID. |
-| `find_deck` | `(name_query)` | Find a user deck by fuzzy name match, returns ID + metadata (new — avoids get_user_decks → get_deck two-hop). |
-| `get_user_decks` | `()` | List all decks for the authenticated Moxfield user. |
-| `refresh_credentials` | `()` | Re-authenticate Moxfield session via browser login. |
-
 ---
 
 ## Server: `mtg_analytics`
@@ -80,5 +72,4 @@
 | Merge 3 combo tools → 1 | Low ↓ |
 | Merge 2 EDHREC tools → 1 | Low ↓ |
 | Add `cache_status` tool | Avoids unnecessary `refresh_cache` calls |
-| Add `find_deck` shortcut | Eliminates common two-hop call pattern |
 | Flag `explain_interaction` N-card limitation | Future: support array of cards for combo checks |
