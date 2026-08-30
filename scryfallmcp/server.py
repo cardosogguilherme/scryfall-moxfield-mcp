@@ -66,6 +66,17 @@ async def get_cards_bulk(
 # ── Moxfield ────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
+async def search_decks(
+    query: Annotated[str, "Keyword search over public Moxfield decks, e.g. 'elves commander'"],
+    format: Annotated[str | None, "Optional format filter, e.g. 'commander', 'modern'"] = None,
+    page: Annotated[int, "1-based page number"] = 1,
+    page_size: Annotated[int, "Results per page (1–50)"] = 20,
+) -> dict:
+    """Search public Moxfield decks by keyword. Works without credentials."""
+    return await _moxfield.search_decks(query, fmt=format, page=page, page_size=page_size)
+
+
+@mcp.tool()
 async def get_user_decks(
     username: Annotated[str, "Moxfield display name / URL slug, e.g. 'johndoe'"],
     name_filter: Annotated[str | None, "Case-insensitive name fragment; returns only matching decks when provided"] = None,
@@ -81,7 +92,7 @@ async def get_user_decks(
 
 @mcp.tool()
 async def get_deck(
-    deck_id: Annotated[str, "Public deck ID from the Moxfield URL"],
+    deck_id: Annotated[str, "Public deck ID, or a full moxfield.com/decks/... URL"],
     enrich_with_scryfall: Annotated[
         Literal["lean", "full", False],
         "'lean' (default): trimmed Scryfall data, commander_legal + price_usd. 'full': all fields. False: skip enrichment.",

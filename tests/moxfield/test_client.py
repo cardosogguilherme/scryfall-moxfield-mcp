@@ -27,10 +27,14 @@ def client(mock_creds):
 
 @respx.mock
 async def test_get_user_decks_returns_list(client):
-    respx.get(f"{MOXFIELD_API}/v2/users/johndoe/decks").mock(return_value=httpx.Response(200, json={
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(return_value=httpx.Response(200, json={
         "data": [
-            {"publicId": "deck1", "name": "Mono-Red Burn", "format": "modern", "lastUpdatedAtUtc": "2026-01-01T00:00:00Z"},
-            {"publicId": "deck2", "name": "Control", "format": "legacy", "lastUpdatedAtUtc": "2026-01-02T00:00:00Z"},
+            {"publicId": "deck1", "name": "Mono-Red Burn", "format": "modern",
+             "createdByUser": {"userName": "johndoe"}, "colorIdentity": ["R"],
+             "lastUpdatedAtUtc": "2026-01-01T00:00:00Z"},
+            {"publicId": "deck2", "name": "Control", "format": "legacy",
+             "createdByUser": {"userName": "johndoe"}, "colorIdentity": ["U"],
+             "lastUpdatedAtUtc": "2026-01-02T00:00:00Z"},
         ]
     }))
     result = await client.get_user_decks("johndoe")
@@ -38,6 +42,7 @@ async def test_get_user_decks_returns_list(client):
     assert result[0]["id"] == "deck1"
     assert result[0]["name"] == "Mono-Red Burn"
     assert result[0]["format"] == "modern"
+    assert result[0]["author"] == "johndoe"
 
 
 MOCK_DECK_RESPONSE = {
@@ -107,7 +112,7 @@ async def test_get_deck_401_triggers_reauth_and_retries(client, mock_creds):
 
 @respx.mock
 async def test_find_deck_returns_matching_decks(client):
-    respx.get(f"{MOXFIELD_API}/v2/users/johndoe/decks").mock(return_value=httpx.Response(200, json={
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(return_value=httpx.Response(200, json={
         "data": [
             {"publicId": "deck1", "name": "Mono-Red Burn", "format": "modern", "lastUpdatedAtUtc": "2026-01-01T00:00:00Z"},
             {"publicId": "deck2", "name": "Blue Control", "format": "legacy", "lastUpdatedAtUtc": "2026-01-02T00:00:00Z"},
@@ -124,7 +129,7 @@ async def test_find_deck_returns_matching_decks(client):
 
 @respx.mock
 async def test_find_deck_no_match_returns_empty(client):
-    respx.get(f"{MOXFIELD_API}/v2/users/johndoe/decks").mock(return_value=httpx.Response(200, json={
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(return_value=httpx.Response(200, json={
         "data": [
             {"publicId": "deck1", "name": "Mono-Red Burn", "format": "modern", "lastUpdatedAtUtc": "2026-01-01T00:00:00Z"},
         ]
@@ -164,3 +169,77 @@ async def test_get_deck_with_enrichment(client):
     assert guide["mana_cost"] == "{R}"
     # 4 × $0.50 (Lightning Bolt) + 4 × $5.00 (Goblin Guide) = $22.00
     assert result["price_total_usd"] == "22.00"
+
+
+@respx.mock
+async def test_search_decks_returns_parsed_results(client):
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(return_value=httpx.Response(200, json={
+        "pageNumber": 1,
+        "pageSize": 20,
+        "totalResults": 2,
+        "totalPages": 1,
+        "data": [
+            {"publicId": "abc123", "name": "Elfball", "format": "commander",
+             "createdByUser": {"userName": "elfmaster"},
+             "publicUrl": "https://moxfield.com/decks/abc123",
+             "colorIdentity": ["G"], "likeCount": 42, "viewCount": 900,
+             "lastUpdatedAtUtc": "2026-02-01T00:00:00Z"},
+            {"publicId": "def456", "name": "Selesnya Elves", "format": "commander",
+             "createdByUser": {"userName": "gwplayer"},
+             "publicUrl": "https://moxfield.com/decks/def456",
+             "colorIdentity": ["G", "W"], "likeCount": 7, "viewCount": 100,
+             "lastUpdatedAtUtc": "2026-02-02T00:00:00Z"},
+        ],
+    }))
+    result = await client.search_decks("elves", fmt="commander")
+    assert result["total_results"] == 2
+    assert result["total_pages"] == 1
+    assert len(result["decks"]) == 2
+    first = result["decks"][0]
+    assert first["id"] == "abc123"
+    assert first["name"] == "Elfball"
+    assert first["url"] == "https://moxfield.com/decks/abc123"
+    assert first["author"] == "elfmaster"
+    assert first["likes"] == 42
+
+
+@respx.mock
+async def test_get_deck_accepts_full_url(client):
+    route = respx.get(f"{MOXFIELD_API}/v2/decks/all/deck1").mock(
+        return_value=httpx.Response(200, json=MOCK_DECK_RESPONSE)
+    )
+    result = await client.get_deck(
+        "https://moxfield.com/decks/deck1", enrich_with_scryfall=False
+    )
+    assert route.called
+    assert result["id"] == "deck1"
+
+
+async def test_get_deck_rejects_invalid_id(client):
+    with respx.mock:
+        route = respx.get(url__regex=rf"{MOXFIELD_API}/v2/decks/all/.*")
+        result = await client.get_deck("foo/../bar", enrich_with_scryfall=False)
+        assert result == {"error": "invalid deck id", "deck_id": "foo/../bar"}
+        assert not route.called
+
+
+@respx.mock
+async def test_get_deck_works_without_credentials():
+    """With no valid credentials, public deck retrieval still succeeds and sends no auth."""
+    no_creds = MagicMock()
+    no_creds.get_valid_credentials = AsyncMock(
+        side_effect=RuntimeError("Moxfield credentials not found.")
+    )
+    mock_scryfall = MagicMock()
+    mock_scryfall.get_cards_bulk = AsyncMock()
+    unauth_client = MoxfieldClient(credential_manager=no_creds, scryfall_client=mock_scryfall)
+
+    respx.get(f"{MOXFIELD_API}/v2/decks/all/deck1").mock(
+        return_value=httpx.Response(200, json=MOCK_DECK_RESPONSE)
+    )
+    result = await unauth_client.get_deck("deck1", enrich_with_scryfall=False)
+    assert result["id"] == "deck1"
+
+    sent_headers = respx.calls.last.request.headers
+    assert "authorization" not in sent_headers
+    assert "cookie" not in sent_headers
