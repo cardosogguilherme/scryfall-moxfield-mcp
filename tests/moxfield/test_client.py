@@ -23,7 +23,11 @@ def mock_creds():
 def client(mock_creds):
     mock_scryfall = MagicMock()
     mock_scryfall.get_cards_bulk = AsyncMock()
-    return MoxfieldClient(credential_manager=mock_creds, scryfall_client=mock_scryfall)
+    return MoxfieldClient(
+        credential_manager=mock_creds,
+        scryfall_client=mock_scryfall,
+        http_client=httpx.AsyncClient(),
+    )
 
 @respx.mock
 async def test_get_user_decks_returns_list(client):
@@ -232,7 +236,11 @@ async def test_get_deck_works_without_credentials():
     )
     mock_scryfall = MagicMock()
     mock_scryfall.get_cards_bulk = AsyncMock()
-    unauth_client = MoxfieldClient(credential_manager=no_creds, scryfall_client=mock_scryfall)
+    unauth_client = MoxfieldClient(
+        credential_manager=no_creds,
+        scryfall_client=mock_scryfall,
+        http_client=httpx.AsyncClient(),
+    )
 
     respx.get(f"{MOXFIELD_API}/v2/decks/all/deck1").mock(
         return_value=httpx.Response(200, json=MOCK_DECK_RESPONSE)

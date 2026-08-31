@@ -1,8 +1,13 @@
 import re
 
-import httpx
 from scryfallmcp.moxfield.auth import CredentialManager, Credentials
 from scryfallmcp.scryfall.client import ScryfallClient
+
+
+class _MoxfieldHTTPError(Exception):
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        super().__init__(f"HTTP {status_code}")
 
 MOXFIELD_API = "https://api2.moxfield.com"
 
@@ -37,10 +42,15 @@ class MoxfieldClient:
         self,
         credential_manager: CredentialManager | None = None,
         scryfall_client: "ScryfallClient | None" = None,
+        http_client=None,
     ):
         self._cred_manager = credential_manager or CredentialManager()
         self._scryfall = scryfall_client or ScryfallClient()
-        self._http = httpx.AsyncClient(timeout=30.0)
+        if http_client is not None:
+            self._http = http_client
+        else:
+            from curl_cffi.requests import AsyncSession
+            self._http = AsyncSession(impersonate="chrome120")
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -93,7 +103,8 @@ class MoxfieldClient:
                 )
             except RuntimeError:
                 pass
-        r.raise_for_status()
+        if not (200 <= r.status_code < 300):
+            raise _MoxfieldHTTPError(r.status_code)
         return r.json()
 
     def _extract_deck_id(self, deck_url_or_id: str) -> str:
@@ -186,8 +197,8 @@ class MoxfieldClient:
 
         try:
             raw = await self._get(f"/v2/decks/all/{deck_id}")
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
+        except _MoxfieldHTTPError as e:
+            if e.status_code == 404:
                 return {"error": "deck not found", "deck_id": deck_id}
             raise
 
