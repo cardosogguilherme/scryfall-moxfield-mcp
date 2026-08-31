@@ -10,6 +10,29 @@ def _is_rate_limited(exc: BaseException) -> bool:
     return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429
 
 
+def _join_faces(card: dict, field: str, sep: str) -> str | None:
+    """Join a per-face field across card_faces, skipping empty values.
+
+    Scryfall leaves several top-level fields null on multi-face cards (every
+    transform / modal DFC / Adventure / split / Room) and puts the real values
+    in card_faces[]. Reading the top level alone silently yields None.
+    """
+    values = [(f.get(field) or "").strip() for f in card.get("card_faces") or []]
+    values = [v for v in values if v]
+    return sep.join(values) if values else None
+
+
+def _front_face(card: dict, field: str):
+    """First face that carries `field` — Scryfall's own convention for combat
+    stats (it copies the front face's power to the top level on Adventures).
+    Kept scalar so numeric consumers don't have to parse a "3 // 5" string."""
+    for face in card.get("card_faces") or []:
+        val = face.get(field)
+        if val is not None:
+            return val
+    return None
+
+
 def _card_to_dict(
     card: dict,
     *,
@@ -19,18 +42,30 @@ def _card_to_dict(
     legalities = card.get("legalities", {})
     result: dict = {
         "name": card.get("name"),
-        "mana_cost": card.get("mana_cost"),
+        # Fall through to card_faces[] when Scryfall leaves the top level null.
+        # oracle_text is null on EVERY multi-face layout; mana_cost only on
+        # transform/modal_dfc (Adventures and splits already carry a joined one).
+        "mana_cost": card.get("mana_cost") or _join_faces(card, "mana_cost", " // "),
         "cmc": card.get("cmc"),
         "type_line": card.get("type_line"),
-        "oracle_text": card.get("oracle_text"),
+        "oracle_text": card.get("oracle_text")
+        or _join_faces(card, "oracle_text", "\n//\n"),
         "color_identity": card.get("color_identity", []),
         "keywords": card.get("keywords", []),
         "set": card.get("set"),
         "rarity": card.get("rarity"),
     }
+    # Only emitted for multi-face cards: it tells a consumer which layout
+    # produced a "A // B" type_line without shipping the card_faces array.
+    # Omitted on normal cards — a flat "layout" on all 100 cards of a deck cost
+    # ~1.7KB and tripped the payload-size guard in tests/test_payload_size.py.
+    if card.get("card_faces"):
+        result["layout"] = card.get("layout")
     # Omit null combat stats — not applicable to non-creatures/planeswalkers
     for field in ("power", "toughness", "loyalty"):
         val = card.get(field)
+        if val is None:
+            val = _front_face(card, field)
         if val is not None:
             result[field] = val
     # Legalities: single boolean by default; full object on request

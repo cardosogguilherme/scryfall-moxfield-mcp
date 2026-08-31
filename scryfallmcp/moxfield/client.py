@@ -22,6 +22,19 @@ _VALID_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _MAX_QUERY_LEN = 300
 _MAX_PAGE_SIZE = 50
 
+# Moxfield's format vocabulary is larger than we can verify by probing (the API
+# rate-limits with HTTP 429 well before the list is exhausted), so `fmt` is
+# bounded by shape rather than by an allowlist that would reject valid formats.
+_MAX_FMT_LEN = 40
+_VALID_FMT_RE = re.compile(r"^[A-Za-z]+$")
+
+# These two vocabularies ARE small and closed, and were verified against the
+# live endpoint: each value below produces a distinct ordering, while an
+# unrecognised value makes Moxfield return an empty error response. Dropping an
+# unknown value is therefore better than forwarding it.
+_SORT_TYPES = frozenset({"updated", "created", "views", "likes", "name", "comments"})
+_SORT_DIRECTIONS = frozenset({"ascending", "descending"})
+
 
 def _clamp_page(page: int) -> int:
     try:
@@ -126,16 +139,34 @@ class MoxfieldClient:
         }
 
     async def search_decks(
-        self, query: str, fmt: str | None = None, page: int = 1, page_size: int = 20
+        self,
+        query: str,
+        fmt: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+        sort_type: str | None = None,
+        sort_direction: str | None = None,
     ) -> dict:
-        """Search public Moxfield decks by keyword. Works unauthenticated."""
+        """Search public Moxfield decks by name. Works unauthenticated.
+
+        The search term goes out as `deckName`. It is NOT `q` — that param is
+        silently ignored by /v2/decks/search, which then returns the unfiltered
+        recent-decks feed and looks like a working search returning wrong decks.
+
+        Note `total_results` is capped at 10000 by Moxfield for broad searches;
+        narrow ones return a real count.
+        """
         params = {
-            "q": (query or "")[:_MAX_QUERY_LEN],
+            "deckName": (query or "")[:_MAX_QUERY_LEN],
             "pageNumber": _clamp_page(page),
             "pageSize": _clamp_page_size(page_size, 20),
         }
-        if fmt:
+        if fmt and len(fmt) <= _MAX_FMT_LEN and _VALID_FMT_RE.match(fmt):
             params["fmt"] = fmt
+        if sort_type in _SORT_TYPES:
+            params["sortType"] = sort_type
+        if sort_direction in _SORT_DIRECTIONS:
+            params["sortDirection"] = sort_direction
         data = await self._get("/v2/decks/search", **params)
         return {
             "total_results": data.get("totalResults"),

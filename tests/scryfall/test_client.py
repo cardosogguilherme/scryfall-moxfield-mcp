@@ -196,3 +196,248 @@ async def test_get_cards_bulk_chunks_at_75(client):
     respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(side_effect=handler)
     await client.get_cards_bulk(names)
     assert call_count == 2
+
+
+# --- Multi-face cards (transform, modal_dfc, adventure, split, Room) ---------
+#
+# Scryfall leaves top-level oracle_text null on every multi-face layout, and
+# additionally leaves mana_cost/power/toughness null on transform + modal_dfc.
+# Those values live in card_faces[]. Payloads below mirror the live API.
+
+
+def _raw_faced(name, layout, faces, **overrides) -> dict:
+    """Raw Scryfall payload for a multi-face card.
+
+    Top-level oracle_text is always None (Scryfall's behaviour on every
+    multi-face layout); other top-level fields are supplied per-layout.
+    """
+    base = {
+        "name": name,
+        "layout": layout,
+        "mana_cost": None,
+        "cmc": 3.0,
+        "type_line": " // ".join(f["type_line"] for f in faces),
+        "oracle_text": None,
+        "colors": None,
+        "color_identity": ["B"],
+        "keywords": [],
+        "set": "fin",
+        "rarity": "mythic",
+        "legalities": {"commander": "legal"},
+        "prices": {"usd": "1.00"},
+        "card_faces": faces,
+    }
+    base.update(overrides)
+    return base
+
+
+_SEPHIROTH = _raw_faced(
+    "Sephiroth, Fabled SOLDIER // Sephiroth, One-Winged Angel",
+    "transform",
+    [
+        {
+            "name": "Sephiroth, Fabled SOLDIER",
+            "mana_cost": "{2}{B}",
+            "type_line": "Legendary Creature - Human Avatar Soldier",
+            "oracle_text": "Whenever Sephiroth enters or attacks, you draw a card.",
+            "colors": ["B"],
+            "power": "3",
+            "toughness": "3",
+        },
+        {
+            "name": "Sephiroth, One-Winged Angel",
+            "mana_cost": "",
+            "type_line": "Legendary Creature - Angel Nightmare Avatar",
+            "oracle_text": "Flying\nSuper Nova - As this creature transforms.",
+            "colors": ["B"],
+            "power": "5",
+            "toughness": "5",
+        },
+    ],
+    keywords=["Flying", "Transform", "Super Nova"],
+)
+
+_FELL_THE_PROFANE = _raw_faced(
+    "Fell the Profane // Fell Mire",
+    "modal_dfc",
+    [
+        {
+            "name": "Fell the Profane",
+            "mana_cost": "{2}{B}{B}",
+            "type_line": "Instant",
+            "oracle_text": "Destroy target creature or planeswalker.",
+            "colors": ["B"],
+        },
+        {
+            "name": "Fell Mire",
+            "mana_cost": "",
+            "type_line": "Land",
+            "oracle_text": "As this land enters, you may pay 3 life.",
+            "colors": [],
+        },
+    ],
+)
+
+# Adventure/split already carry a joined mana_cost and real colors at top level.
+_THRANDUIL = _raw_faced(
+    "Thranduil, Sindarin Liege // Silvan Rally",
+    "adventure",
+    [
+        {
+            "name": "Thranduil, Sindarin Liege",
+            "mana_cost": "{2}{G/U}{G/U}",
+            "type_line": "Legendary Creature - Elf Noble",
+            "oracle_text": "Other Elves you control get +1/+1.\nLandfall.",
+            "power": "2",
+            "toughness": "3",
+        },
+        {
+            "name": "Silvan Rally",
+            "mana_cost": "{1}{G/U}{G/U}",
+            "type_line": "Sorcery - Adventure",
+            "oracle_text": "Mill four cards, then put up to two lands into your hand.",
+        },
+    ],
+    mana_cost="{2}{G/U}{G/U} // {1}{G/U}{G/U}",
+    colors=["G", "U"],
+    color_identity=["G", "U"],
+    power="2",
+    toughness="3",
+)
+
+_FIRE_ICE = _raw_faced(
+    "Fire // Ice",
+    "split",
+    [
+        {
+            "name": "Fire",
+            "mana_cost": "{1}{R}",
+            "type_line": "Instant",
+            "oracle_text": "Fire deals 2 damage divided as you choose.",
+        },
+        {
+            "name": "Ice",
+            "mana_cost": "{1}{U}",
+            "type_line": "Instant",
+            "oracle_text": "Tap target permanent.\nDraw a card.",
+        },
+    ],
+    mana_cost="{1}{R} // {1}{U}",
+    colors=["R", "U"],
+    color_identity=["R", "U"],
+)
+
+_ROOM = _raw_faced(
+    "Bottomless Pool // Locker Room",
+    "split",
+    [
+        {
+            "name": "Bottomless Pool",
+            "mana_cost": "{U}",
+            "type_line": "Enchantment - Room",
+            "oracle_text": "When you unlock this door, return up to one creature.",
+        },
+        {
+            "name": "Locker Room",
+            "mana_cost": "{4}{U}",
+            "type_line": "Enchantment - Room",
+            "oracle_text": "Whenever one or more creatures you control deal damage.",
+        },
+    ],
+    mana_cost="{U} // {4}{U}",
+    colors=["U"],
+    color_identity=["U"],
+)
+
+
+async def _fetch_faced(client, raw):
+    respx.get(f"{SCRYFALL_BASE}/cards/named").mock(
+        return_value=httpx.Response(200, json=raw)
+    )
+    return await client.get_card_by_name(raw["name"])
+
+
+@respx.mock
+async def test_transform_dfc_joins_both_faces(client):
+    card = await _fetch_faced(client, _SEPHIROTH)
+    assert card["oracle_text"] is not None
+    # Text from BOTH faces must be present
+    assert "Whenever Sephiroth enters or attacks" in card["oracle_text"]
+    assert "Super Nova" in card["oracle_text"]
+    assert card["oracle_text"] == (
+        "Whenever Sephiroth enters or attacks, you draw a card."
+        "\n//\n"
+        "Flying\nSuper Nova - As this creature transforms."
+    )
+    # mana_cost is null at top level on transform; back face has no cost, so the
+    # join yields only the front face's cost.
+    assert card["mana_cost"] == "{2}{B}"
+    # Combat stats come from the FRONT face, kept scalar for numeric consumers
+    assert card["power"] == "3"
+    assert card["toughness"] == "3"
+    assert card["layout"] == "transform"
+
+
+@respx.mock
+async def test_modal_dfc_joins_both_faces(client):
+    card = await _fetch_faced(client, _FELL_THE_PROFANE)
+    assert card["oracle_text"] is not None
+    assert "Destroy target creature" in card["oracle_text"]
+    assert "As this land enters" in card["oracle_text"]
+    assert card["mana_cost"] == "{2}{B}{B}"
+    assert card["layout"] == "modal_dfc"
+    # The front face is an Instant - type_line must still expose both faces so a
+    # downstream classifier can tell this is not a plain Land.
+    assert card["type_line"] == "Instant // Land"
+
+
+@respx.mock
+async def test_adventure_joins_oracle_and_keeps_toplevel_mana_cost(client):
+    card = await _fetch_faced(client, _THRANDUIL)
+    assert card["oracle_text"] is not None
+    assert "Other Elves you control get +1/+1." in card["oracle_text"]
+    assert "Mill four cards" in card["oracle_text"]
+    # Scryfall already populates these at top level for adventure - passthrough
+    assert card["mana_cost"] == "{2}{G/U}{G/U} // {1}{G/U}{G/U}"
+    assert card["power"] == "2"
+    assert card["layout"] == "adventure"
+
+
+@respx.mock
+async def test_split_card_joins_both_halves(client):
+    card = await _fetch_faced(client, _FIRE_ICE)
+    assert card["oracle_text"] is not None
+    assert "Fire deals 2 damage" in card["oracle_text"]
+    assert "Tap target permanent." in card["oracle_text"]
+    assert card["mana_cost"] == "{1}{R} // {1}{U}"
+    assert "power" not in card  # neither half is a creature
+
+
+@respx.mock
+async def test_room_joins_both_doors(client):
+    card = await _fetch_faced(client, _ROOM)
+    assert card["oracle_text"] is not None
+    assert "When you unlock this door" in card["oracle_text"]
+    assert "Whenever one or more creatures" in card["oracle_text"]
+    assert card["mana_cost"] == "{U} // {4}{U}"
+
+
+@respx.mock
+async def test_multiface_card_does_not_leak_card_faces(client):
+    """The trimmed shape is preserved - card_faces would ~double the payload."""
+    card = await _fetch_faced(client, _SEPHIROTH)
+    assert "card_faces" not in card
+
+
+@respx.mock
+async def test_single_faced_card_is_unchanged(client):
+    """Regression: the fall-through must not alter normal cards."""
+    respx.get(f"{SCRYFALL_BASE}/cards/named").mock(
+        return_value=httpx.Response(200, json=_raw_card(layout="normal"))
+    )
+    card = await client.get_card_by_name("Lightning Bolt")
+    assert card["oracle_text"] == "Lightning Bolt deals 3 damage to any target."
+    assert card["mana_cost"] == "{R}"
+    # layout is emitted only for multi-face cards: carrying it on every card of
+    # a 100-card deck added ~1.7KB and tripped the payload-size guard.
+    assert "layout" not in card

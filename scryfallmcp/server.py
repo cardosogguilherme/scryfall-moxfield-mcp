@@ -67,13 +67,29 @@ async def get_cards_bulk(
 
 @mcp.tool()
 async def search_decks(
-    query: Annotated[str, "Keyword search over public Moxfield decks, e.g. 'elves commander'"],
+    query: Annotated[str, "Deck-name search over public Moxfield decks, e.g. 'atraxa'"],
     format: Annotated[str | None, "Optional format filter, e.g. 'commander', 'modern'"] = None,
     page: Annotated[int, "1-based page number"] = 1,
     page_size: Annotated[int, "Results per page (1–50)"] = 20,
+    sort_type: Annotated[
+        str | None,
+        "Sort field: 'updated', 'created', 'views', 'likes', 'name' or 'comments'",
+    ] = None,
+    sort_direction: Annotated[str | None, "'ascending' or 'descending'"] = None,
 ) -> dict:
-    """Search public Moxfield decks by keyword. Works without credentials."""
-    return await _moxfield.search_decks(query, fmt=format, page=page, page_size=page_size)
+    """Search public Moxfield decks by deck name. Works without credentials.
+
+    Matches on deck name, not card contents. `total_results` is capped at 10000
+    by Moxfield for broad searches; narrow searches return a real count.
+    """
+    return await _moxfield.search_decks(
+        query,
+        fmt=format,
+        page=page,
+        page_size=page_size,
+        sort_type=sort_type,
+        sort_direction=sort_direction,
+    )
 
 
 @mcp.tool()

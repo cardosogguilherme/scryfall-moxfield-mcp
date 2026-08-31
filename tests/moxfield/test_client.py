@@ -4,7 +4,7 @@ import httpx
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timezone, timedelta
 from scryfallmcp.moxfield.auth import Credentials
-from scryfallmcp.moxfield.client import MoxfieldClient
+from scryfallmcp.moxfield.client import MoxfieldClient, _MAX_QUERY_LEN
 
 MOXFIELD_API = "https://api2.moxfield.com"
 
@@ -251,3 +251,104 @@ async def test_get_deck_works_without_credentials():
     sent_headers = respx.calls.last.request.headers
     assert "authorization" not in sent_headers
     assert "cookie" not in sent_headers
+
+
+# --- search_decks wire params ------------------------------------------------
+#
+# Regression for the bug where search_decks sent `q=`, which /v2/decks/search
+# silently ignores, returning the unfiltered recent-decks feed. The endpoint's
+# real filter param is `deckName=` (verified live: a nonsense deckName returns
+# totalResults 0, while `q` never changes the result set).
+
+_EMPTY_SEARCH = {"totalResults": 0, "pageNumber": 1, "totalPages": 0, "data": []}
+
+
+def _mock_search():
+    return respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(
+        return_value=httpx.Response(200, json=_EMPTY_SEARCH)
+    )
+
+
+@respx.mock
+async def test_search_decks_sends_deckname_not_q(client):
+    _mock_search()
+    await client.search_decks("atraxa")
+    params = respx.calls.last.request.url.params
+    assert params["deckName"] == "atraxa"
+    # `q` is the param the endpoint ignores - it must not be sent at all
+    assert "q" not in params
+
+
+@respx.mock
+async def test_search_decks_sends_paging(client):
+    _mock_search()
+    await client.search_decks("atraxa", page=3, page_size=5)
+    params = respx.calls.last.request.url.params
+    assert params["pageNumber"] == "3"
+    assert params["pageSize"] == "5"
+
+
+@respx.mock
+async def test_search_decks_omits_optional_filters_when_unset(client):
+    _mock_search()
+    await client.search_decks("atraxa")
+    params = respx.calls.last.request.url.params
+    for key in ("fmt", "sortType", "sortDirection"):
+        assert key not in params
+
+
+@respx.mock
+async def test_search_decks_forwards_valid_filters(client):
+    _mock_search()
+    await client.search_decks(
+        "atraxa", fmt="commander", sort_type="views", sort_direction="ascending"
+    )
+    params = respx.calls.last.request.url.params
+    assert params["fmt"] == "commander"
+    assert params["sortType"] == "views"
+    assert params["sortDirection"] == "ascending"
+
+
+@respx.mock
+async def test_search_decks_rejects_unknown_sort_values(client):
+    """Unknown sort values are dropped, not forwarded - an unrecognised value
+    makes Moxfield fall back to the unfiltered feed, which is this bug's shape."""
+    _mock_search()
+    await client.search_decks("atraxa", sort_type="bogus", sort_direction="sideways")
+    params = respx.calls.last.request.url.params
+    assert "sortType" not in params
+    assert "sortDirection" not in params
+
+
+@respx.mock
+async def test_search_decks_rejects_malformed_format(client):
+    """fmt is bounded by shape (letters only, length-capped) rather than by an
+    allowlist - Moxfield's format vocabulary is larger than we could verify."""
+    _mock_search()
+    for bad in ("not-a-real-format", "commander; drop", "x" * 100, "fmt=1&evil=2"):
+        _mock_search()
+        await client.search_decks("atraxa", fmt=bad)
+        assert "fmt" not in respx.calls.last.request.url.params
+
+
+@respx.mock
+async def test_search_decks_accepts_wellformed_format(client):
+    _mock_search()
+    await client.search_decks("atraxa", fmt="oathbreaker")
+    assert respx.calls.last.request.url.params["fmt"] == "oathbreaker"
+
+
+@respx.mock
+async def test_search_decks_clamps_query_length(client):
+    _mock_search()
+    await client.search_decks("z" * 5000)
+    assert len(respx.calls.last.request.url.params["deckName"]) == _MAX_QUERY_LEN
+
+
+@respx.mock
+async def test_get_user_decks_sends_author_filter(client):
+    """get_user_decks already used the correct param - guard it stays correct."""
+    _mock_search()
+    await client.get_user_decks("Darrknar")
+    params = respx.calls.last.request.url.params
+    assert params["authorUserNames"] == "Darrknar"
