@@ -1,15 +1,49 @@
 import re
 
 from scryfallmcp.moxfield.auth import CredentialManager, Credentials
-from scryfallmcp.scryfall.client import ScryfallClient
+from scryfallmcp.scryfall.client import ScryfallClient, _front_name
 
 
 class _MoxfieldHTTPError(Exception):
-    def __init__(self, status_code: int):
+    """A non-2xx from Moxfield, carrying the signal needed to tell apart a
+    Cloudflare bot-management block from a Moxfield application error.
+
+    A bare "HTTP 403" is unactionable: it cannot distinguish an edge challenge
+    (`cf-mitigated`, a Ray ID, an HTML interstitial) from Moxfield itself
+    refusing the request. Only response-side data is captured — request headers
+    can carry the Bearer token and cookies and must never be echoed.
+    """
+
+    def __init__(self, status_code: int, response=None):
         self.status_code = status_code
-        super().__init__(f"HTTP {status_code}")
+        self.cf_ray = self.cf_mitigated = self.server = self.body = None
+        if response is not None:
+            headers = getattr(response, "headers", {}) or {}
+            self.cf_ray = headers.get("cf-ray")
+            self.cf_mitigated = headers.get("cf-mitigated")
+            self.server = headers.get("server")
+            self.body = (getattr(response, "text", "") or "")[:_ERROR_BODY_CHARS].strip()
+        super().__init__(self._message())
+
+    def _message(self) -> str:
+        signal = {
+            "cf-mitigated": self.cf_mitigated,
+            "cf-ray": self.cf_ray,
+            "server": self.server,
+        }
+        detail = ", ".join(f"{k}={v}" for k, v in signal.items() if v)
+        msg = f"HTTP {self.status_code}"
+        if detail:
+            msg += f" ({detail})"
+        if self.body:
+            msg += f": {self.body!r}"
+        return msg
 
 MOXFIELD_API = "https://api2.moxfield.com"
+
+# How much of an error body to keep. Enough to recognise a Cloudflare
+# interstitial or a JSON error, short enough not to dump an HTML page.
+_ERROR_BODY_CHARS = 200
 
 # Extract the public deck id from a full Moxfield URL, e.g.
 # https://moxfield.com/decks/abc123 -> abc123
@@ -63,10 +97,15 @@ class MoxfieldClient:
             self._http = http_client
         else:
             from curl_cffi.requests import AsyncSession
-            self._http = AsyncSession(impersonate="chrome120")
+            # "chrome" tracks the newest profile the installed curl_cffi ships,
+            # so the fingerprint stops ageing against Cloudflare on every bump.
+            self._http = AsyncSession(impersonate="chrome")
 
     async def close(self) -> None:
-        await self._http.aclose()
+        # httpx spells it aclose(), curl_cffi's AsyncSession spells it close().
+        # Both are coroutines; the injected test double may be either.
+        closer = getattr(self._http, "aclose", None) or self._http.close
+        await closer()
         await self._scryfall.close()
 
     async def __aenter__(self):
@@ -76,17 +115,18 @@ class MoxfieldClient:
         await self.close()
 
     def _headers(self, creds: Credentials | None = None) -> dict:
-        """Browser-mimicking headers required to reach Moxfield's public API.
+        """Site headers for Moxfield's public API.
+
+        Deliberately no User-Agent: curl_cffi's impersonation supplies one that
+        matches the TLS/HTTP2 fingerprint it presents. Hand-writing a UA here
+        pins it to whatever Chrome version we last typed and contradicts that
+        fingerprint, which is exactly what Cloudflare scores on.
 
         Authentication is optional: the Authorization/Cookie pair is only
         attached when valid credentials are available (needed for private
-        decks). Public read endpoints work with the browser headers alone.
+        decks). Public read endpoints work with these headers alone.
         """
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-            ),
             "Accept": "application/json",
             "Origin": "https://www.moxfield.com",
             "Referer": "https://www.moxfield.com/",
@@ -117,7 +157,7 @@ class MoxfieldClient:
             except RuntimeError:
                 pass
         if not (200 <= r.status_code < 300):
-            raise _MoxfieldHTTPError(r.status_code)
+            raise _MoxfieldHTTPError(r.status_code, r)
         return r.json()
 
     def _extract_deck_id(self, deck_url_or_id: str) -> str:
@@ -252,14 +292,25 @@ class MoxfieldClient:
             include_all_legalities=full,
             include_all_prices=full,
         )
-        scryfall_by_name = {c["name"]: c for c in scryfall_cards if "name" in c}
+        # Index under both the full name and the front face: Moxfield names
+        # DFCs "A // B" while a caller (or another source) may use "A" alone,
+        # and Scryfall always answers with the full joined name.
+        scryfall_by_name: dict[str, dict] = {}
+        for c in scryfall_cards:
+            name = c.get("name")
+            if not name or "error" in c:
+                continue
+            scryfall_by_name.setdefault(name, c)
+            scryfall_by_name.setdefault(_front_name(name), c)
 
         total_usd = 0.0
         has_price = False
 
         for board in deck["boards"].values():
             for card in board:
-                sc = scryfall_by_name.get(card["name"], {})
+                sc = scryfall_by_name.get(card["name"]) or scryfall_by_name.get(
+                    _front_name(card["name"])
+                ) or {}
                 card.update({k: v for k, v in sc.items() if k != "name"})
                 price_str = sc.get("price_usd") if not full else (sc.get("prices") or {}).get("usd")
                 if price_str:

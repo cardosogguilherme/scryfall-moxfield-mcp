@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]",
     "httpx",
-    "curl_cffi>=0.7.0",
+    "curl_cffi>=0.13",
     "tenacity",
     "python-dotenv",
 ]
@@ -22,3 +22,6 @@ scryfallmcp = "scryfallmcp.server:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Live tests hit the real Moxfield endpoints; opt in with `-m live`.
+addopts = "-m 'not live'"
+markers = ["live: hits real network endpoints (deselected by default)"]

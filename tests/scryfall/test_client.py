@@ -1,3 +1,4 @@
+import json
 import pytest
 import respx
 import httpx
@@ -441,3 +442,73 @@ async def test_single_faced_card_is_unchanged(client):
     # layout is emitted only for multi-face cards: carrying it on every card of
     # a 100-card deck added ~1.7KB and tripped the payload-size guard.
     assert "layout" not in card
+
+
+# --- Double-faced names in get_cards_bulk ------------------------------------
+# /cards/collection does not resolve a full "A // B" name: every such identifier
+# comes back in `not_found`, while the front face alone resolves to the same
+# card. Moxfield names DFCs with the full form, so before this the whole
+# multi-face half of every deck was silently dropped from enrichment.
+
+
+@respx.mock
+async def test_get_cards_bulk_sends_front_face_name(client):
+    """Verified live against Scryfall: the full joined name never resolves."""
+    sent = {}
+
+    def handler(request):
+        sent.update(json.loads(request.content))
+        return httpx.Response(200, json={"data": [_FELL_THE_PROFANE], "not_found": []})
+
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(side_effect=handler)
+    result = await client.get_cards_bulk(["Fell the Profane // Fell Mire"])
+
+    assert sent["identifiers"] == [{"name": "Fell the Profane"}]
+    # The caller still gets Scryfall's full name back, not our truncated lookup key
+    assert result[0]["name"] == "Fell the Profane // Fell Mire"
+    assert "Destroy target creature" in result[0]["oracle_text"]
+    assert result[0]["price_usd"] is not None
+
+
+@respx.mock
+async def test_get_cards_bulk_matches_result_to_requested_name(client):
+    """A DFC requested by front face alone must still pair with its card."""
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(
+        return_value=httpx.Response(200, json={"data": [_FELL_THE_PROFANE]})
+    )
+    result = await client.get_cards_bulk(["Fell the Profane"])
+    assert result[0]["name"] == "Fell the Profane // Fell Mire"
+
+
+@respx.mock
+async def test_get_cards_bulk_reports_missing_names(client):
+    """A genuine miss is surfaced, not a silent hole in the list."""
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(
+        return_value=httpx.Response(200, json={
+            "data": [_raw_card(name="Lightning Bolt")],
+            "not_found": [{"name": "Definitely Not A Card"}],
+        })
+    )
+    result = await client.get_cards_bulk(["Lightning Bolt", "Definitely Not A Card"])
+    assert len(result) == 2
+    assert result[0]["name"] == "Lightning Bolt"
+    assert result[1] == {"name": "Definitely Not A Card", "error": "card not found"}
+
+
+@respx.mock
+async def test_get_cards_bulk_chunks_at_75_with_faced_names(client):
+    """The name rewrite must not disturb chunking."""
+    names = [f"Card {i} // Back {i}" for i in range(76)]
+    call_count = 0
+
+    def handler(request):
+        nonlocal call_count
+        call_count += 1
+        assert all(" // " not in i["name"] for i in json.loads(request.content)["identifiers"])
+        return httpx.Response(200, json={"data": []})
+
+    respx.post(f"{SCRYFALL_BASE}/cards/collection").mock(side_effect=handler)
+    result = await client.get_cards_bulk(names)
+    assert call_count == 2
+    assert len(result) == 76
+    assert all(c["error"] == "card not found" for c in result)

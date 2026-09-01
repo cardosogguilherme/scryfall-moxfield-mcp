@@ -352,3 +352,170 @@ async def test_get_user_decks_sends_author_filter(client):
     await client.get_user_decks("Darrknar")
     params = respx.calls.last.request.url.params
     assert params["authorUserNames"] == "Darrknar"
+
+
+# --- Double-faced cards in deck enrichment ------------------------------------
+# Moxfield names DFCs with the full "A // B" form (confirmed on live decks, e.g.
+# "Jin-Gitaxias // The Great Synthesis"). Scryfall answers with that same joined
+# name, but a caller or another source may use the front face alone — so the
+# index has to accept both forms or the card silently loses all enrichment.
+
+_DFC_DECK_RESPONSE = {
+    "id": "dfc1",
+    "name": "Phyrexian Praetors",
+    "format": "commander",
+    "description": "",
+    "createdByUser": {"userName": "johndoe"},
+    "mainboard": {
+        "Jin-Gitaxias // The Great Synthesis": {
+            "quantity": 1,
+            "card": {"name": "Jin-Gitaxias // The Great Synthesis"},
+        },
+        # The front-face-only form, to prove the index works in both directions
+        "Fell the Profane": {"quantity": 2, "card": {"name": "Fell the Profane"}},
+    },
+    "sideboard": {},
+    "commanders": {},
+    "companions": {},
+}
+
+_DFC_SCRYFALL_DATA = [
+    {"name": "Jin-Gitaxias // The Great Synthesis", "mana_cost": "{5}{U}",
+     "type_line": "Legendary Creature — Phyrexian Praetor // Enchantment — Saga",
+     "oracle_text": "Whenever you cast a spell...\n//\nDraw cards.",
+     "color_identity": ["U"], "cmc": 6.0, "keywords": [], "layout": "transform",
+     "commander_legal": True, "set": "mom", "rarity": "mythic", "price_usd": "10.00"},
+    {"name": "Fell the Profane // Fell Mire", "mana_cost": "{2}{B}{B}",
+     "type_line": "Instant // Land",
+     "oracle_text": "Destroy target creature.\n//\nAs this land enters...",
+     "color_identity": ["B"], "cmc": 4.0, "keywords": [], "layout": "modal_dfc",
+     "commander_legal": True, "set": "mh3", "rarity": "uncommon", "price_usd": "4.00"},
+]
+
+
+@respx.mock
+async def test_enrichment_matches_double_faced_names(client):
+    respx.get(f"{MOXFIELD_API}/v2/decks/all/dfc1").mock(
+        return_value=httpx.Response(200, json=_DFC_DECK_RESPONSE)
+    )
+    client._scryfall.get_cards_bulk.return_value = _DFC_SCRYFALL_DATA
+    result = await client.get_deck("dfc1", enrich_with_scryfall="lean")
+
+    mainboard = result["boards"]["mainboard"]
+    jin = next(c for c in mainboard if c["name"].startswith("Jin-Gitaxias"))
+    assert jin["oracle_text"] is not None
+    assert jin["type_line"] == (
+        "Legendary Creature — Phyrexian Praetor // Enchantment — Saga"
+    )
+    assert jin["layout"] == "transform"
+
+    # Requested by front face, answered by Scryfall with the joined name
+    fell = next(c for c in mainboard if c["name"] == "Fell the Profane")
+    assert fell["type_line"] == "Instant // Land"
+    assert fell["oracle_text"] is not None
+
+    # 1 × $10.00 + 2 × $4.00 — both DFCs contributed instead of being dropped
+    assert result["price_total_usd"] == "18.00"
+
+
+@respx.mock
+async def test_enrichment_skips_not_found_entries(client):
+    """A `card not found` entry must not paste an `error` key into the deck."""
+    respx.get(f"{MOXFIELD_API}/v2/decks/all/deck1").mock(
+        return_value=httpx.Response(200, json=MOCK_DECK_RESPONSE)
+    )
+    client._scryfall.get_cards_bulk.return_value = [
+        {"name": "Lightning Bolt", "price_usd": "0.50", "oracle_text": "Deal 3 damage."},
+        {"name": "Goblin Guide", "error": "card not found"},
+    ]
+    result = await client.get_deck("deck1", enrich_with_scryfall="lean")
+
+    mainboard = result["boards"]["mainboard"]
+    guide = next(c for c in mainboard if c["name"] == "Goblin Guide")
+    assert "error" not in guide
+    assert result["price_total_usd"] == "2.00"  # 4 × $0.50, the miss adds nothing
+
+
+# --- Cloudflare diagnostics ---------------------------------------------------
+
+
+@respx.mock
+async def test_http_error_carries_cloudflare_signal(client):
+    """A bare "HTTP 403" cannot distinguish an edge block from a Moxfield error."""
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(
+        return_value=httpx.Response(
+            403,
+            headers={
+                "cf-ray": "8f2c1a0000abcdef-SYD",
+                "cf-mitigated": "challenge",
+                "server": "cloudflare",
+            },
+            text="<!DOCTYPE html><html>Attention Required! | Cloudflare</html>",
+        )
+    )
+    with pytest.raises(Exception) as exc:
+        await client.search_decks("atraxa")
+
+    msg = str(exc.value)
+    assert "HTTP 403" in msg
+    assert "cf-mitigated=challenge" in msg
+    assert "cf-ray=8f2c1a0000abcdef-SYD" in msg
+    assert "server=cloudflare" in msg
+    assert "Attention Required" in msg
+
+
+@respx.mock
+async def test_http_error_body_is_truncated(client):
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(
+        return_value=httpx.Response(403, text="x" * 5000)
+    )
+    with pytest.raises(Exception) as exc:
+        await client.search_decks("atraxa")
+    assert len(str(exc.value)) < 400
+
+
+@respx.mock
+async def test_http_error_never_echoes_request_headers(client):
+    """The Bearer token and session cookies must not reach an error message."""
+    respx.get(f"{MOXFIELD_API}/v2/decks/search").mock(
+        return_value=httpx.Response(403, text="blocked")
+    )
+    with pytest.raises(Exception) as exc:
+        await client.search_decks("atraxa")
+    msg = str(exc.value)
+    assert "testtoken123" not in msg
+    assert "_moxfield_session" not in msg
+
+
+async def test_close_supports_curl_cffi_session():
+    """curl_cffi's AsyncSession has close(), not aclose() — closing must not raise."""
+    curl_cffi_shaped = MagicMock(spec=["get", "close"])
+    curl_cffi_shaped.close = AsyncMock()
+    mock_scryfall = MagicMock()
+    mock_scryfall.close = AsyncMock()
+
+    client = MoxfieldClient(
+        credential_manager=MagicMock(),
+        scryfall_client=mock_scryfall,
+        http_client=curl_cffi_shaped,
+    )
+    await client.close()
+
+    curl_cffi_shaped.close.assert_awaited_once()
+    mock_scryfall.close.assert_awaited_once()
+
+
+async def test_close_supports_httpx_client():
+    httpx_shaped = MagicMock(spec=["get", "aclose"])
+    httpx_shaped.aclose = AsyncMock()
+    mock_scryfall = MagicMock()
+    mock_scryfall.close = AsyncMock()
+
+    client = MoxfieldClient(
+        credential_manager=MagicMock(),
+        scryfall_client=mock_scryfall,
+        http_client=httpx_shaped,
+    )
+    await client.close()
+
+    httpx_shaped.aclose.assert_awaited_once()

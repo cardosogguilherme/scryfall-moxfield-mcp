@@ -33,6 +33,18 @@ def _front_face(card: dict, field: str):
     return None
 
 
+def _front_name(name: str) -> str:
+    """Front-face name of a card name, e.g. "Fire // Ice" -> "Fire".
+
+    /cards/collection does NOT resolve a full double-faced name: every
+    "A // B" identifier comes back in `not_found`, while the front face alone
+    resolves to the same full card. Moxfield names DFCs with the full form, so
+    without this every transform / modal DFC / split / Room / Adventure card in
+    a deck was silently dropped from enrichment.
+    """
+    return (name or "").split(" // ")[0]
+
+
 def _card_to_dict(
     card: dict,
     *,
@@ -183,11 +195,20 @@ class ScryfallClient:
 
         async def fetch_chunk(chunk: list[str]) -> list[dict]:
             async with semaphore:
-                payload = {"identifiers": [{"name": n} for n in chunk]}
+                payload = {"identifiers": [{"name": _front_name(n)} for n in chunk]}
                 data = await self._post("/cards/collection", payload)
-                return [
+                cards = [
                     _card_to_dict(c, include_all_legalities=include_all_legalities, include_all_prices=include_all_prices)
                     for c in data.get("data", [])
+                ]
+                # Scryfall answers in resolution order and omits misses, so pair
+                # results back to what the caller asked for by front-face name.
+                by_front = {
+                    _front_name(c["name"]): c for c in cards if c.get("name")
+                }
+                return [
+                    by_front.get(_front_name(n), {"name": n, "error": "card not found"})
+                    for n in chunk
                 ]
 
         results = await asyncio.gather(*[fetch_chunk(c) for c in chunks])
